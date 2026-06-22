@@ -2,11 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { api, supabase } from '@/api/supabaseClient';
 import { motion } from 'framer-motion';
 import { X, Bell } from 'lucide-react';
+import { useToast, Toast } from '@/components/Toast';
 
 export default function NotificationsPanel({ currentUser, profile, onClose, onNavigateToSettings }) {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [pendingSlips, setPendingSlips] = useState([]);
+  const { message: toastMessage, show: showToast } = useToast();
 
   const needsSetPassword =
     !currentUser?.identities?.some(i => i.provider === 'email') &&
@@ -25,7 +27,7 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
     setLoading(true);
     const [notifs, slips] = await Promise.all([
       api.entities.Notification.filter({ user_id: currentUser.id }, '-created_at', 30),
-      api.entities.Slip.filter({ user_id: currentUser.id, status: 'pending_confirmation' }),
+      api.entities.Slip.filter({ user_id: currentUser.id, status: 'pending' }),
     ]);
     setNotifications(notifs);
     setPendingSlips(slips);
@@ -57,6 +59,7 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
       });
     }
     setPendingSlips(prev => prev.filter(s => s.id !== slip.id));
+    showToast('Slip confirmed — penalty applied.');
   }
 
   async function disputeSlip(slip) {
@@ -74,6 +77,7 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
       });
     }
     setPendingSlips(prev => prev.filter(s => s.id !== slip.id));
+    showToast('Slip disputed — your partner has been notified.');
   }
 
   const typeIcons = {
@@ -97,6 +101,7 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
       initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
       transition={{ type: 'spring', damping: 25, stiffness: 300 }}
     >
+      <Toast message={toastMessage} />
       <div className="flex items-center gap-3 p-4 border-b border-border flex-shrink-0">
         <Bell size={20} />
         <h2 className="font-bold text-lg flex-1">Notifications</h2>

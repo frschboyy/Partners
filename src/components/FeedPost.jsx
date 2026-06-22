@@ -37,6 +37,7 @@ export default function FeedPost({
   allPosts = [],
   currentUserId,
   profiles = {},
+  initialCommentCount = 0,
   onOpenChat,
   onRefresh,
 }) {
@@ -53,6 +54,7 @@ export default function FeedPost({
   const [commentsExpanded, setCommentsExpanded] = useState(false);
   const [commentPostId, setCommentPostId] = useState(null); // null = use post.id
   const [comments, setComments] = useState([]);
+  const [commentsLoaded, setCommentsLoaded] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [loadingComments, setLoadingComments] = useState(false);
   const [sendingComment, setSendingComment] = useState(false);
@@ -206,6 +208,7 @@ export default function FeedPost({
     } catch (_) {
       setComments([]);
     }
+    setCommentsLoaded(true);
     setLoadingComments(false);
     setTimeout(() => commentInputRef.current?.focus(), 200);
   }
@@ -347,7 +350,7 @@ export default function FeedPost({
           </motion.div>
         ) : (
           photoUrls[0] ? (
-            <img src={photoUrls[0]} alt="post" className="w-full h-full object-cover" loading="eager" decoding="async" fetchPriority="high" />
+            <img src={photoUrls[0]} alt="post" className="w-full h-full object-cover" loading="eager" decoding="async" fetchpriority="high" />
           ) : (
             <div className="w-full h-full flex items-center justify-center" style={{ background: 'linear-gradient(135deg, hsl(var(--theme-accent-muted)), hsl(var(--card)))' }}>
               <span className="text-8xl opacity-30">{postEmoji(post)}</span>
@@ -458,9 +461,12 @@ export default function FeedPost({
 
           <motion.button whileTap={{ scale: 0.85 }} onClick={() => openComments()} className="p-2.5 rounded-full bg-black/50 text-white flex items-center gap-1">
             <MessageCircle size={18} />
-            {comments.filter(c => !c.reply_to_id).length > 0 && (
-              <span className="text-xs font-bold">{comments.filter(c => !c.reply_to_id).length}</span>
-            )}
+            {(() => {
+              const count = commentsLoaded
+                ? comments.filter(c => !c.reply_to_id).length
+                : initialCommentCount;
+              return count > 0 ? <span className="text-xs font-bold">{count}</span> : null;
+            })()}
           </motion.button>
 
           {focused && (

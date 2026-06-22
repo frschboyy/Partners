@@ -1,8 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { api } from '@/api/supabaseClient';
-import { motion, AnimatePresence } from 'framer-motion';
+import { api, supabase } from '@/api/supabaseClient';
+import { motion } from 'framer-motion';
 import Avatar from '@/components/Avatar';
-import { Send, ArrowLeft } from 'lucide-react';
+import { Send, ArrowLeft, Pencil, Trash2, Check, X as XIcon } from 'lucide-react';
+
+function formatTime(dateStr) {
+  if (!dateStr) return '';
+  const diff = (Date.now() - new Date(dateStr).getTime()) / 1000;
+  if (diff < 60) return 'now';
+  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+  if (diff < 604800) return new Date(dateStr).toLocaleDateString(undefined, { weekday: 'short' });
+  return new Date(dateStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
 
 export default function Chat({ currentUser, profile }) {
   const [partnerships, setPartnerships] = useState([]);
@@ -13,35 +23,84 @@ export default function Chat({ currentUser, profile }) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [unreadCounts, setUnreadCounts] = useState({});
+  const [lastActivity, setLastActivity] = useState({});
+  const [activeMessageId, setActiveMessageId] = useState(null);
+  const [editingMessageId, setEditingMessageId] = useState(null);
+  const [editText, setEditText] = useState('');
   const bottomRef = useRef(null);
+  const selectedPartnershipRef = useRef(null);
+
+  useEffect(() => { selectedPartnershipRef.current = selectedPartnership; }, [selectedPartnership]);
 
   useEffect(() => {
     if (!currentUser) return;
     loadPartnerships();
-    const unsub = api.entities.Partnership.subscribe(() => loadPartnerships());
-    return unsub;
+    const partnershipUnsub = api.entities.Partnership.subscribe(() => loadPartnerships());
+
+    // Update the list view in real-time when any new message arrives
+    const msgUnsub = api.entities.ChatMessage.subscribe(event => {
+      if (event.type !== 'insert' || !event.data?.partnership_id) return;
+      const pid = event.data.partnership_id;
+      setLastActivity(prev => ({
+        ...prev,
+        [pid]: { time: event.data.created_at, text: event.data.content, senderId: event.data.sender_id },
+      }));
+      // Only bump unread if it's from the partner and we're not currently in that chat
+      if (
+        event.data.sender_id !== currentUser.id &&
+        selectedPartnershipRef.current?.id !== pid
+      ) {
+        setUnreadCounts(prev => ({ ...prev, [pid]: (prev[pid] || 0) + 1 }));
+      }
+    });
+
+    return () => { partnershipUnsub(); msgUnsub(); };
   }, [currentUser]);
 
   useEffect(() => {
     if (!selectedPartnership) return;
+    const pid = selectedPartnership.id;
     setMessages([]);
-    loadMessages(selectedPartnership.id);
-    const unsub = api.entities.ChatMessage.subscribe(event => {
-      if (event.data?.partnership_id === selectedPartnership.id) {
-        setMessages(prev => {
-          if (event.type === 'create') {
-            // Dedupe: if message already exists (added optimistically), replace by id
-            const exists = prev.some(m => m.id === event.data.id);
-            if (exists) return prev.map(m => m.id === event.data.id ? event.data : m);
-            return [...prev, event.data];
+    loadMessages(pid);
+
+    const channel = supabase
+      .channel(`chat-${pid}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'chat_messages', filter: `partnership_id=eq.${pid}` },
+        payload => {
+          const type = payload.eventType;
+          const data = type === 'DELETE' ? payload.old : payload.new;
+
+          if (type === 'INSERT' && data.sender_id !== currentUser.id) {
+            // Mark incoming partner messages as read immediately — without this,
+            // messages seen via realtime are never written to read_by in the DB,
+            // so the unread count comes back after leaving the chat.
+            api.entities.ChatMessage.update(data.id, {
+              read_by: [...(data.read_by || []), currentUser.id],
+            }).catch(() => {});
           }
-          if (event.type === 'update') return prev.map(m => m.id === event.data.id ? event.data : m);
-          if (event.type === 'delete') return prev.filter(m => m.id !== event.data?.id);
-          return prev;
-        });
-      }
-    });
-    return unsub;
+
+          setMessages(prev => {
+            if (type === 'INSERT') {
+              const exists = prev.some(m => m.id === data.id);
+              if (exists) return prev.map(m => m.id === data.id ? data : m);
+              return [...prev, data];
+            }
+            if (type === 'UPDATE') return prev.map(m => m.id === data.id ? data : m);
+            if (type === 'DELETE') return prev.filter(m => m.id !== data?.id);
+            return prev;
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+      // Zero out the unread count for this chat when leaving so the dot clears
+      // immediately without waiting for a DB round-trip.
+      setUnreadCounts(prev => ({ ...prev, [pid]: 0 }));
+    };
   }, [selectedPartnership]);
 
   useEffect(() => {
@@ -65,13 +124,18 @@ export default function Chat({ currentUser, profile }) {
     if (profile) profileMap[currentUser.id] = profile;
     setPartnerProfiles(profileMap);
 
-    // Load unread counts
+    // Fetch last message + unread count per partnership (desc so first = most recent)
     const unread = {};
+    const activity = {};
     for (const p of myPartnerships) {
-      const msgs = await api.entities.ChatMessage.filter({ partnership_id: p.id }, 'created_at', 100);
+      const msgs = await api.entities.ChatMessage.filter({ partnership_id: p.id }, '-created_at', 50);
       unread[p.id] = msgs.filter(m => !m.read_by?.includes(currentUser.id) && m.sender_id !== currentUser.id).length;
+      if (msgs.length > 0) {
+        activity[p.id] = { time: msgs[0].created_at, text: msgs[0].content, senderId: msgs[0].sender_id };
+      }
     }
     setUnreadCounts(unread);
+    setLastActivity(activity);
   }
 
   async function loadMessages(partnershipId) {
@@ -87,6 +151,18 @@ export default function Chat({ currentUser, profile }) {
       )
     );
     setUnreadCounts(prev => ({ ...prev, [partnershipId]: 0 }));
+  }
+
+  async function saveEdit(msg) {
+    const trimmed = editText.trim();
+    if (!trimmed || trimmed === msg.content) { setEditingMessageId(null); return; }
+    await api.entities.ChatMessage.update(msg.id, { content: trimmed });
+    setEditingMessageId(null);
+  }
+
+  async function deleteMessage(msg) {
+    setActiveMessageId(null);
+    await api.entities.ChatMessage.update(msg.id, { is_deleted: true });
   }
 
   async function sendMessage() {
@@ -154,20 +230,54 @@ export default function Chat({ currentUser, profile }) {
           ) : null}
           {messages.map(msg => {
             const isMe = msg.sender_id === currentUser.id;
+            const ageMs = Date.now() - new Date(msg.created_at).getTime();
+            const canEdit = isMe && !msg.is_deleted && msg.message_type !== 'system' && ageMs < 5 * 60 * 1000;
+            const canDelete = isMe && !msg.is_deleted && msg.message_type !== 'system' && ageMs < 30 * 60 * 1000;
+            const showActions = activeMessageId === msg.id && !editingMessageId;
+            const isEditing = editingMessageId === msg.id;
+
             return (
               <motion.div
                 key={msg.id}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}
+                className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
               >
-                <div className={`max-w-[78%] px-3.5 py-2.5 rounded-2xl ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
+                <div
+                  className={`max-w-[78%] px-3.5 py-2.5 rounded-2xl ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
                   style={{
                     background: isMe ? 'hsl(var(--theme-accent))' : 'hsl(var(--secondary))',
                     color: isMe ? 'hsl(var(--theme-accent-fg))' : 'hsl(var(--foreground))',
-                  }}>
-                  {msg.message_type === 'system' ? (
+                    cursor: (canEdit || canDelete) ? 'pointer' : 'default',
+                  }}
+                  onClick={() => {
+                    if (canEdit || canDelete) setActiveMessageId(p => p === msg.id ? null : msg.id);
+                  }}
+                >
+                  {msg.is_deleted ? (
+                    <p className="text-xs italic opacity-50">Message deleted</p>
+                  ) : msg.message_type === 'system' ? (
                     <p className="text-xs italic opacity-70">{msg.content}</p>
+                  ) : isEditing ? (
+                    <div className="flex items-center gap-2 min-w-[160px]">
+                      <input
+                        autoFocus
+                        className="bg-transparent border-none outline-none text-sm flex-1 min-w-0"
+                        style={{ color: 'inherit' }}
+                        value={editText}
+                        onChange={e => setEditText(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') saveEdit(msg);
+                          if (e.key === 'Escape') setEditingMessageId(null);
+                        }}
+                      />
+                      <button onClick={e => { e.stopPropagation(); saveEdit(msg); }} className="opacity-80 flex-shrink-0">
+                        <Check size={14} />
+                      </button>
+                      <button onClick={e => { e.stopPropagation(); setEditingMessageId(null); }} className="opacity-80 flex-shrink-0">
+                        <XIcon size={14} />
+                      </button>
+                    </div>
                   ) : (
                     <>
                       <p className="text-sm leading-relaxed">{msg.content}</p>
@@ -177,6 +287,27 @@ export default function Chat({ currentUser, profile }) {
                     </>
                   )}
                 </div>
+                {showActions && (
+                  <div className="flex gap-1.5 mt-1">
+                    {canEdit && (
+                      <button
+                        onClick={() => { setEditText(msg.content); setEditingMessageId(msg.id); setActiveMessageId(null); }}
+                        className="flex items-center gap-1 text-[11px] text-muted-foreground bg-secondary px-2.5 py-1 rounded-full"
+                      >
+                        <Pencil size={10} /> Edit
+                      </button>
+                    )}
+                    {canDelete && (
+                      <button
+                        onClick={() => deleteMessage(msg)}
+                        className="flex items-center gap-1 text-[11px] text-destructive px-2.5 py-1 rounded-full"
+                        style={{ background: 'hsl(var(--destructive) / 0.1)' }}
+                      >
+                        <Trash2 size={10} /> Delete
+                      </button>
+                    )}
+                  </div>
+                )}
               </motion.div>
             );
           })}
@@ -206,6 +337,12 @@ export default function Chat({ currentUser, profile }) {
     );
   }
 
+  const sortedPartnerships = [...partnerships].sort((a, b) => {
+    const timeA = lastActivity[a.id]?.time || a.created_at || '';
+    const timeB = lastActivity[b.id]?.time || b.created_at || '';
+    return timeB > timeA ? 1 : -1;
+  });
+
   return (
     <div className="flex flex-col h-full bg-background">
       <div className="px-4 pt-6 pb-4">
@@ -214,18 +351,24 @@ export default function Chat({ currentUser, profile }) {
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 space-y-2">
-        {partnerships.length === 0 ? (
+        {sortedPartnerships.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-48 gap-3">
             <p className="text-4xl">💬</p>
             <p className="font-semibold text-center">No conversations yet</p>
             <p className="text-sm text-muted-foreground text-center">Form a partnership on your Home screen to start chatting.</p>
           </div>
         ) : (
-          partnerships.map(p => {
+          sortedPartnerships.map(p => {
             const partnerId = p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id;
             const partnerName = p.user_a_id === currentUser.id ? p.user_b_name : p.user_a_name;
             const partnerProfile = partnerProfiles[partnerId];
             const unread = unreadCounts[p.id] || 0;
+            const activity = lastActivity[p.id];
+            const preview = p.status === 'negotiating'
+              ? '📋 Negotiating terms'
+              : activity
+                ? (activity.senderId === currentUser.id ? `You: ${activity.text}` : activity.text)
+                : 'Tap to open chat';
 
             return (
               <motion.button
@@ -236,16 +379,24 @@ export default function Chat({ currentUser, profile }) {
               >
                 <Avatar profile={partnerProfile} size="sm" noAutoFlip />
                 <div className="flex-1 min-w-0">
-                  <p className="font-bold text-sm">{partnerName}</p>
-                  <p className="text-xs text-muted-foreground truncate">
-            {p.status === 'negotiating' ? '📋 Negotiating terms' : 'Tap to open chat'}
-          </p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className={`text-sm truncate ${unread > 0 ? 'font-bold' : 'font-semibold'}`}>{partnerName}</p>
+                    {activity?.time && (
+                      <p className="text-[11px] text-muted-foreground flex-shrink-0">{formatTime(activity.time)}</p>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between gap-2 mt-0.5">
+                    <p className={`text-xs truncate ${unread > 0 ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
+                      {preview}
+                    </p>
+                    {unread > 0 && (
+                      <span
+                        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                        style={{ background: 'hsl(var(--theme-accent))' }}
+                      />
+                    )}
+                  </div>
                 </div>
-                {unread > 0 && (
-                  <span className="w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs font-bold flex items-center justify-center">
-                    {unread}
-                  </span>
-                )}
               </motion.button>
             );
           })

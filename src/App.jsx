@@ -7,9 +7,9 @@ import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import ScrollToTop from './components/ScrollToTop';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { api } from '@/api/supabaseClient';
-import { applyTheme, getSavedTheme, saveTheme } from '@/lib/theme';
+import { applyTheme, getSavedTheme, saveTheme, applyFontSize, getSavedFontSize, saveFontSize } from '@/lib/theme';
 
 // Pages
 import Login from './pages/Login';
@@ -49,10 +49,12 @@ function MainApp({ user }) {
   const [currentTheme, setCurrentTheme] = useState(() => getSavedTheme().theme);
   const [darkMode, setDarkMode] = useState(() => getSavedTheme().darkMode);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [newFeedPosts, setNewFeedPosts] = useState(false);
   const [settingsSection, setSettingsSection] = useState(null);
 
   useEffect(() => {
     applyTheme(currentTheme, darkMode);
+    applyFontSize(getSavedFontSize());
   }, []);
 
   useEffect(() => {
@@ -66,7 +68,12 @@ function MainApp({ user }) {
     const unsub = api.entities.ChatMessage.subscribe(() => checkUnread());
     const unsub2 = api.entities.Notification.subscribe(() => checkNotifications());
     const unsub3 = api.entities.Slip.subscribe(() => checkNotifications());
-    return () => { unsub(); unsub2(); unsub3(); };
+    const unsub4 = api.entities.Post.subscribe(event => {
+      if (event.type === 'insert' && event.data?.user_id !== user.id) {
+        setNewFeedPosts(true);
+      }
+    });
+    return () => { unsub(); unsub2(); unsub3(); unsub4(); };
   
   }, [user]);
 
@@ -85,6 +92,10 @@ function MainApp({ user }) {
         applyTheme(theme, dm);
         saveTheme(theme, dm);
       }
+      if (p.font_size) {
+        applyFontSize(p.font_size);
+        saveFontSize(p.font_size);
+      }
     }
     setLoadingProfile(false);
   }
@@ -92,7 +103,7 @@ function MainApp({ user }) {
   async function checkNotifications() {
     const [notifs, pendingSlips] = await Promise.all([
       api.entities.Notification.filter({ user_id: user.id, read: false }),
-      api.entities.Slip.filter({ user_id: user.id, status: 'pending_confirmation' }),
+      api.entities.Slip.filter({ user_id: user.id, status: 'pending' }),
     ]);
     const needsPassword =
       !user.identities?.some(i => i.provider === 'email') &&
@@ -114,6 +125,7 @@ function MainApp({ user }) {
   }
 
   function handleTabChange(tab) {
+    if (tab === 'feed') setNewFeedPosts(false);
     if (tab !== 'notifications') {
       setPrevTab(tab);
       localStorage.setItem('accountable_last_tab', tab);
@@ -196,6 +208,7 @@ function MainApp({ user }) {
         onTabChange={tab => { handleTabChange(tab); if (tab === 'notifications') checkNotifications(); }}
         unreadMessages={unreadMessages}
         unreadNotifications={unreadNotifications}
+        feedHasNew={newFeedPosts}
       />
     </div>
   );

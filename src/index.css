@@ -74,9 +74,9 @@
     --theme-accent-muted: 75 60% 88%;
   }
 
-  /* Theme: coral — light + dark */
-  .theme-coral,
-  .dark.theme-coral {
+  /* Theme: coral — dark */
+  .dark.theme-coral,
+  .theme-coral {
     --primary: 6 90% 58%;
     --primary-foreground: 0 0% 98%;
     --accent: 6 90% 58%;
@@ -89,10 +89,17 @@
     --sidebar-primary-foreground: 0 0% 98%;
     --sidebar-ring: 6 90% 58%;
   }
+  /* Theme: coral — light override */
+  .light.theme-coral {
+    --primary: 6 85% 48%;
+    --theme-accent: 6 85% 48%;
+    --theme-accent-muted: 6 80% 92%;
+    --ring: 6 85% 48%;
+  }
 
-  /* Theme: electric blue */
-  .theme-blue,
-  .dark.theme-blue {
+  /* Theme: electric blue — dark */
+  .dark.theme-blue,
+  .theme-blue {
     --primary: 210 100% 60%;
     --primary-foreground: 0 0% 5%;
     --accent: 210 100% 60%;
@@ -105,10 +112,18 @@
     --sidebar-primary-foreground: 0 0% 5%;
     --sidebar-ring: 210 100% 60%;
   }
+  /* Theme: electric blue — light override */
+  .light.theme-blue {
+    --primary: 210 90% 42%;
+    --theme-accent: 210 90% 42%;
+    --theme-accent-fg: 0 0% 98%;
+    --theme-accent-muted: 210 80% 92%;
+    --ring: 210 90% 42%;
+  }
 
-  /* Theme: hot pink */
-  .theme-pink,
-  .dark.theme-pink {
+  /* Theme: hot pink — dark */
+  .dark.theme-pink,
+  .theme-pink {
     --primary: 330 90% 62%;
     --primary-foreground: 0 0% 98%;
     --accent: 330 90% 62%;
@@ -121,10 +136,17 @@
     --sidebar-primary-foreground: 0 0% 98%;
     --sidebar-ring: 330 90% 62%;
   }
+  /* Theme: hot pink — light override */
+  .light.theme-pink {
+    --primary: 330 80% 50%;
+    --theme-accent: 330 80% 50%;
+    --theme-accent-muted: 330 80% 92%;
+    --ring: 330 80% 50%;
+  }
 
-  /* Theme: orange */
-  .theme-orange,
-  .dark.theme-orange {
+  /* Theme: orange — dark */
+  .dark.theme-orange,
+  .theme-orange {
     --primary: 28 95% 58%;
     --primary-foreground: 0 0% 5%;
     --accent: 28 95% 58%;
@@ -136,6 +158,13 @@
     --sidebar-primary: 28 95% 58%;
     --sidebar-primary-foreground: 0 0% 5%;
     --sidebar-ring: 28 95% 58%;
+  }
+  /* Theme: orange — light override */
+  .light.theme-orange {
+    --primary: 28 90% 46%;
+    --theme-accent: 28 90% 46%;
+    --theme-accent-muted: 28 90% 92%;
+    --ring: 28 90% 46%;
   }
 
   .dark {

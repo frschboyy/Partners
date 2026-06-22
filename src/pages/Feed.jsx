@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { api } from '@/api/supabaseClient';
+import { api, supabase } from '@/api/supabaseClient';
 import LocketFeed from '@/components/LocketFeed';
 import { motion } from 'framer-motion';
 
@@ -7,6 +7,7 @@ export default function Feed({ currentUser, profile }) {
   const [posts, setPosts] = useState([]);
   const [profiles, setProfiles] = useState({});
   const [allPostsByUser, setAllPostsByUser] = useState({});
+  const [commentCounts, setCommentCounts] = useState({});
   const [loading, setLoading] = useState(true);
   const [chatTarget, setChatTarget] = useState(null);
   const [chatPartnership, setChatPartnership] = useState(null);
@@ -18,10 +19,9 @@ export default function Feed({ currentUser, profile }) {
 
   async function loadFeed() {
     setLoading(true);
-    const [allPartnerships, allProfiles, allPosts] = await Promise.all([
+    const [allPartnerships, allProfiles] = await Promise.all([
       api.entities.Partnership.list(),
       api.entities.UserProfile.list(),
-      api.entities.Post.list('-created_at', 200),
     ]);
 
     const myPartnerships = allPartnerships.filter(
@@ -34,24 +34,69 @@ export default function Feed({ currentUser, profile }) {
     );
     const allowedUserIds = [currentUser.id, ...partnerIds];
 
-    // Only show posts from partners (or self)
-    const feedPosts = allPosts.filter(p => allowedUserIds.includes(p.user_id));
-
     const profileMap = {};
     allProfiles.forEach(pr => { profileMap[pr.user_id] = pr; });
-    // Add current user profile
     if (profile) profileMap[currentUser.id] = profile;
     setProfiles(profileMap);
 
-    // Group all posts by user for grid view
+    // Feed: last 7 days, with a 20-post floor so sparse partnerships aren't empty
+    const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    const { data: recentPosts } = await supabase
+      .from('posts')
+      .select('*')
+      .in('user_id', allowedUserIds)
+      .gte('created_at', oneWeekAgo)
+      .order('created_at', { ascending: false })
+      .limit(100);
+
+    let feedPosts = recentPosts || [];
+
+    if (feedPosts.length < 20) {
+      const { data: olderPosts } = await supabase
+        .from('posts')
+        .select('*')
+        .in('user_id', allowedUserIds)
+        .lt('created_at', oneWeekAgo)
+        .order('created_at', { ascending: false })
+        .limit(20 - feedPosts.length);
+      feedPosts = [...feedPosts, ...(olderPosts || [])];
+    }
+
+    // Grid view needs all posts per user (not just the feed window)
+    const { data: allUserPosts } = await supabase
+      .from('posts')
+      .select('*')
+      .in('user_id', allowedUserIds)
+      .order('created_at', { ascending: false })
+      .limit(200);
+
     const byUser = {};
-    allPosts.forEach(p => {
+    (allUserPosts || []).forEach(p => {
       if (!byUser[p.user_id]) byUser[p.user_id] = [];
       byUser[p.user_id].push(p);
     });
     setAllPostsByUser(byUser);
 
     setPosts(feedPosts);
+
+    // Fetch top-level comment counts for all feed posts in one query
+    const postIds = feedPosts.map(p => p.id);
+    const counts = {};
+    if (postIds.length > 0) {
+      const { data: commentRows } = await supabase
+        .from('chat_messages')
+        .select('post_id')
+        .in('post_id', postIds)
+        .is('reply_to_id', null);
+      if (commentRows) {
+        commentRows.forEach(r => {
+          counts[r.post_id] = (counts[r.post_id] || 0) + 1;
+        });
+      }
+    }
+    setCommentCounts(counts);
+
     setLoading(false);
   }
 
@@ -70,6 +115,7 @@ export default function Feed({ currentUser, profile }) {
         currentUserId={currentUser.id}
         profiles={profiles}
         allPostsByUser={allPostsByUser}
+        commentCounts={commentCounts}
         onOpenChat={(post) => {
           // Find the partnership for this post author
           const partnership = partnerships.find(p =>

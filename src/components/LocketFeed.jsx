@@ -11,6 +11,7 @@ export default function LocketFeed({
   currentUserId,
   profiles = {},
   allPostsByUser = {},
+  commentCounts = {},
   onOpenChat,
   onRefresh,
   emptyMessage = 'Nothing here yet',
@@ -133,6 +134,7 @@ export default function LocketFeed({
             allPosts={userAllPosts}
             currentUserId={currentUserId}
             profiles={profiles}
+            initialCommentCount={commentCounts[post.id] || 0}
             onOpenChat={onOpenChat}
             onRefresh={onRefresh}
           />

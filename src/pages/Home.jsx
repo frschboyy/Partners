@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Compass, Flame, Star, ChevronDown, UserX, Eye, AlertTriangle } from 'lucide-react';
+import { useToast, Toast } from '@/components/Toast';
 import PartnershipFinancials from '@/components/PartnershipFinancials';
 import { api, supabase } from '@/api/supabaseClient';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -518,6 +519,7 @@ function WitnessedSlipModal({ currentUser, profile, partnerName, partnerId, part
   const [selectedRuleId, setSelectedRuleId] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const { message: toastMessage, show: showToast } = useToast();
 
   async function submit() {
     if (!selectedRuleId) return;
@@ -531,7 +533,7 @@ function WitnessedSlipModal({ currentUser, profile, partnerName, partnerId, part
       rule_title: rule?.title || '',
       penalty_amount: partnership.penalty_amount || 0,
       slip_type: 'witnessed',
-      status: 'pending_confirmation',
+      status: 'pending',
       slip_date: new Date().toISOString().split('T')[0],
       notes,
     });
@@ -547,7 +549,8 @@ function WitnessedSlipModal({ currentUser, profile, partnerName, partnerId, part
       read: false,
     });
     setSaving(false);
-    onClose();
+    showToast('Slip reported — your partner will be notified.');
+    setTimeout(onClose, 1500);
   }
 
   return (
@@ -556,6 +559,7 @@ function WitnessedSlipModal({ currentUser, profile, partnerName, partnerId, part
       initial={{ opacity: 0 }} animate={{ opacity: 1 }}
       onClick={e => e.target === e.currentTarget && onClose()}
     >
+      <Toast message={toastMessage} />
       <motion.div
         className="w-full max-w-lg bg-card rounded-t-2xl p-6 space-y-4"
         initial={{ y: '100%' }} animate={{ y: 0 }}

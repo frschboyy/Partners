@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Plus, Trash2, CheckCircle, Send, Lock, RefreshCw } from 'lucide-react';
 import { api, supabase } from '@/api/supabaseClient';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -16,9 +16,56 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
   const [saving, setSaving] = useState(false);
   const [showRenegotiateConfirm, setShowRenegotiateConfirm] = useState(false);
 
+  // Live partnership state — kept fresh via on-mount fetch + real-time subscription
+  const [livePartnership, setLivePartnership] = useState(partnership);
+
   const isUserA = currentUserId === partnership.user_a_id;
   const partnerName = isUserA ? partnership.user_b_name : partnership.user_a_name;
   const myName = isUserA ? partnership.user_a_name : partnership.user_b_name;
+
+  // Fetch fresh state on open (prop may be stale if partner submitted before we opened)
+  // and subscribe to real-time updates so we detect concurrent submissions instantly.
+  useEffect(() => {
+    supabase
+      .from('partnerships')
+      .select('*')
+      .eq('id', partnership.id)
+      .single()
+      .then(({ data }) => { if (data) setLivePartnership(data); });
+
+    const channel = supabase
+      .channel(`partnership-modal-${partnership.id}`)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'partnerships',
+        filter: `id=eq.${partnership.id}`,
+      }, payload => {
+        if (payload.new) setLivePartnership(payload.new);
+      })
+      .subscribe();
+
+    return () => supabase.removeChannel(channel);
+  }, [partnership.id]);
+
+  // When the partner submits a proposal while we have the modal open, sync the
+  // form fields so the user sees what the partner actually proposed.
+  const prevCanAcceptRef = useRef(false);
+  const lastProposerId = livePartnership.last_proposer_id;
+  const iProposed = lastProposerId === currentUserId;
+  const proposalPending = !!lastProposerId;
+  const canAccept = proposalPending && !iProposed;
+
+  useEffect(() => {
+    if (!prevCanAcceptRef.current && canAccept) {
+      setGoals(livePartnership.shared_goals || []);
+      setPenalty(livePartnership.penalty_amount || 100);
+      setUserARules(livePartnership.user_a_rules || []);
+      setUserBRules(livePartnership.user_b_rules || []);
+      setSpecialAllowances(livePartnership.special_allowances || []);
+    }
+    prevCanAcceptRef.current = canAccept;
+  }, [canAccept]);
 
   // Prefill my rules section from personal rules (only if currently empty)
   useEffect(() => {
@@ -30,15 +77,10 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
     }
   }, []);
 
-  const lastProposerId = partnership.last_proposer_id;
-  const iProposed = lastProposerId === currentUserId;
-  const proposalPending = !!lastProposerId;
-  const canAccept = proposalPending && !iProposed;
-
   // Settled = both parties have agreed and status is active
-  const isSettled = partnership.status === 'active'
-    && partnership.user_a_agreed
-    && partnership.user_b_agreed;
+  const isSettled = livePartnership.status === 'active'
+    && livePartnership.user_a_agreed
+    && livePartnership.user_b_agreed;
 
   function addGoal() {
     if (newGoal.trim()) { setGoals(g => [...g, newGoal.trim()]); setNewGoal(''); }
@@ -53,16 +95,35 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
 
   async function handleSubmitProposal() {
     setSaving(true);
-    await api.entities.Partnership.update(partnership.id, {
-      shared_goals: goals,
-      penalty_amount: Number(penalty),
-      user_a_rules: userARules,
-      user_b_rules: userBRules,
-      special_allowances: specialAllowances,
-      user_a_agreed: false,
-      user_b_agreed: false,
-      last_proposer_id: currentUserId,
+
+    // Atomically claim the proposal slot — only succeeds if no one else has proposed
+    const { data: claimed, error } = await supabase.rpc('claim_proposal_slot', {
+      p_partnership_id: partnership.id,
+      p_proposer_id:    currentUserId,
     });
+
+    if (error || !claimed) {
+      const { data: fresh } = await supabase
+        .from('partnerships')
+        .select('*')
+        .eq('id', partnership.id)
+        .single();
+      if (fresh) setLivePartnership(fresh);
+      setSaving(false);
+      return;
+    }
+
+    // Slot is ours — write the full proposal terms
+    await api.entities.Partnership.update(partnership.id, {
+      shared_goals:       goals,
+      penalty_amount:     Number(penalty) || 0,
+      user_a_rules:       userARules,
+      user_b_rules:       userBRules,
+      special_allowances: specialAllowances,
+      user_a_agreed:      false,
+      user_b_agreed:      false,
+    });
+
     const partnerId = isUserA ? partnership.user_b_id : partnership.user_a_id;
     await supabase.from('notifications').insert({
       user_id: partnerId,
@@ -306,8 +367,9 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
               </div>
             )}
             {proposalPending && canAccept && (
-              <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-xs text-center font-semibold text-yellow-500">
-                {partnerName} sent a proposal. Review the terms below then Accept or Counter-Propose.
+              <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-xs text-center font-semibold text-yellow-500 space-y-1">
+                <p>🚫 {partnerName} already submitted a proposal.</p>
+                <p className="font-normal text-yellow-400">Review the terms below, then Accept or Counter-Propose — you cannot submit a new proposal right now.</p>
               </div>
             )}
           </div>

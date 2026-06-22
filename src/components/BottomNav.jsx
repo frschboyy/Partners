@@ -11,7 +11,7 @@ const TABS = [
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
-export default function BottomNav({ activeTab, onTabChange, unreadMessages = 0, unreadNotifications = 0 }) {
+export default function BottomNav({ activeTab, onTabChange, unreadMessages = 0, unreadNotifications = 0, feedHasNew = false }) {
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 bg-card border-t border-border"
       style={{ paddingBottom: 'env(safe-area-inset-bottom, 8px)' }}>
@@ -19,6 +19,7 @@ export default function BottomNav({ activeTab, onTabChange, unreadMessages = 0, 
         {TABS.map(({ id, label, icon: Icon }) => {
           const isActive = activeTab === id;
           const badge = id === 'chat' ? unreadMessages : id === 'notifications' ? unreadNotifications : 0;
+          const showFeedDot = id === 'feed' && feedHasNew;
           return (
             <motion.button
               key={id}
@@ -35,6 +36,12 @@ export default function BottomNav({ activeTab, onTabChange, unreadMessages = 0, 
                   <span className="absolute -top-1 -right-1 w-4 h-4 bg-destructive rounded-full text-[9px] font-bold text-white flex items-center justify-center">
                     {badge > 9 ? '9+' : badge}
                   </span>
+                )}
+                {showFeedDot && (
+                  <span
+                    className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full"
+                    style={{ background: 'hsl(var(--theme-accent))' }}
+                  />
                 )}
               </div>
               <span className="text-[10px] font-medium leading-none">{label}</span>

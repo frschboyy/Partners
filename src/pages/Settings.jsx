@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { api, supabase } from '@/api/supabaseClient';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Moon, Sun, Camera, LogOut, Check, Eye, EyeOff, Lock, ChevronDown, Trash2 } from 'lucide-react';
-import { THEMES, applyTheme, saveTheme } from '@/lib/theme';
+import { THEMES, applyTheme, saveTheme, FONT_SIZES, applyFontSize, getSavedFontSize, saveFontSize } from '@/lib/theme';
 import Avatar from '@/components/Avatar';
 import { useToast, Toast } from '@/components/Toast';
 import { useAuth } from '@/lib/AuthContext';
@@ -33,6 +33,7 @@ export default function Settings({ currentUser, profile, onProfileUpdate, curren
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [deleteStep, setDeleteStep] = useState(0);
   const [deleting, setDeleting] = useState(false);
+  const [pendingFontSize, setPendingFontSize] = useState(() => getSavedFontSize());
   const passwordRef = useRef(null);
 
   useEffect(() => {
@@ -131,6 +132,15 @@ export default function Settings({ currentUser, profile, onProfileUpdate, curren
       avatar_mode: 'emoji',
     });
     onProfileUpdate?.(updated);
+  }
+
+  function handleApplyFontSize() {
+    applyFontSize(pendingFontSize);
+    saveFontSize(pendingFontSize);
+    if (profile) {
+      api.entities.UserProfile.update(profile.id, { font_size: pendingFontSize });
+    }
+    showToast('Font size applied!');
   }
 
   function handleThemeChange(theme) {
@@ -271,6 +281,49 @@ export default function Settings({ currentUser, profile, onProfileUpdate, curren
               </motion.button>
             ))}
           </div>
+        </div>
+
+        {/* Font size */}
+        <div className="card-brutal p-5 space-y-4">
+          <div>
+            <h2 className="font-bold text-sm uppercase tracking-wider text-muted-foreground">Text Size</h2>
+            <p className="text-xs text-muted-foreground mt-1">Select a size, then tap Apply to update the whole app.</p>
+          </div>
+          <div className="space-y-2">
+            {FONT_SIZES.map(s => (
+              <motion.button
+                key={s.id}
+                whileTap={{ scale: 0.97 }}
+                onClick={() => setPendingFontSize(s.id)}
+                className="w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-all"
+                style={pendingFontSize === s.id
+                  ? { background: 'hsl(var(--theme-accent-muted))', borderColor: 'hsl(var(--theme-accent))' }
+                  : { background: 'hsl(var(--secondary))', borderColor: 'hsl(var(--border))' }}
+              >
+                <div
+                  className="w-12 h-12 rounded-lg flex items-center justify-center font-bold bg-background border border-border flex-shrink-0"
+                  style={{ fontSize: `${s.px}px`, lineHeight: 1 }}
+                >
+                  Aa
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-sm">{s.label}</p>
+                  <p className="text-xs text-muted-foreground">{s.description}</p>
+                </div>
+                {pendingFontSize === s.id && (
+                  <Check size={16} style={{ color: 'hsl(var(--theme-accent))' }} />
+                )}
+              </motion.button>
+            ))}
+          </div>
+          <motion.button
+            whileTap={{ scale: 0.96 }}
+            onClick={handleApplyFontSize}
+            className="w-full py-3 rounded-lg font-bold text-sm"
+            style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
+          >
+            Apply
+          </motion.button>
         </div>
 
         {/* Password section — always visible */}
