@@ -1,0 +1,27 @@
+{
+  "name": "SummertidesDeclaration",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "type": "string"
+    },
+    "user_name": {
+      "type": "string"
+    },
+    "declared_at": {
+      "type": "string"
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    },
+    "year": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "user_id",
+    "declared_at",
+    "year"
+  ]
+}

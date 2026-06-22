@@ -1,0 +1,40 @@
+{
+  "name": "ChatMessage",
+  "type": "object",
+  "properties": {
+    "partnership_id": {
+      "type": "string"
+    },
+    "sender_id": {
+      "type": "string"
+    },
+    "sender_name": {
+      "type": "string"
+    },
+    "content": {
+      "type": "string"
+    },
+    "post_id": {
+      "type": "string"
+    },
+    "message_type": {
+      "type": "string",
+      "enum": [
+        "text",
+        "system"
+      ],
+      "default": "text"
+    },
+    "read_by": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "partnership_id",
+    "sender_id",
+    "content"
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "name": "Slip",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "type": "string"
+    },
+    "reporter_id": {
+      "type": "string"
+    },
+    "partnership_id": {
+      "type": "string"
+    },
+    "rule_id": {
+      "type": "string"
+    },
+    "rule_title": {
+      "type": "string"
+    },
+    "penalty_amount": {
+      "type": "number",
+      "default": 0
+    },
+    "penalty_waived": {
+      "type": "boolean",
+      "default": false
+    },
+    "waiver_reason": {
+      "type": "string"
+    },
+    "slip_type": {
+      "type": "string",
+      "enum": [
+        "self",
+        "witnessed"
+      ],
+      "default": "self"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "confirmed",
+        "disputed",
+        "pending_confirmation"
+      ],
+      "default": "confirmed"
+    },
+    "slip_date": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "post_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "user_id",
+    "rule_id",
+    "slip_date"
+  ]
+}

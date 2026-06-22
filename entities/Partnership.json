@@ -1,0 +1,85 @@
+{
+  "name": "Partnership",
+  "type": "object",
+  "properties": {
+    "user_a_id": {
+      "type": "string"
+    },
+    "user_b_id": {
+      "type": "string"
+    },
+    "user_a_name": {
+      "type": "string"
+    },
+    "user_b_name": {
+      "type": "string"
+    },
+    "shared_goals": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "user_a_rules": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "user_b_rules": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "penalty_amount": {
+      "type": "number",
+      "default": 100
+    },
+    "special_allowances": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "recurring_allowances": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "user_a_agreed": {
+      "type": "boolean",
+      "default": false
+    },
+    "user_b_agreed": {
+      "type": "boolean",
+      "default": false
+    },
+    "last_proposer_id": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "negotiating",
+        "active",
+        "dissolved"
+      ],
+      "default": "negotiating"
+    },
+    "agreed_at": {
+      "type": "string"
+    },
+    "dissolved_at": {
+      "type": "string"
+    },
+    "request_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "user_a_id",
+    "user_b_id"
+  ]
+}

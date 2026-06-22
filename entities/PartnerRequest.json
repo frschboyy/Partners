@@ -1,0 +1,38 @@
+{
+  "name": "PartnerRequest",
+  "type": "object",
+  "properties": {
+    "requester_id": {
+      "type": "string"
+    },
+    "recipient_id": {
+      "type": "string"
+    },
+    "requester_name": {
+      "type": "string"
+    },
+    "recipient_name": {
+      "type": "string"
+    },
+    "intro_message": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "accepted",
+        "declined",
+        "cancelled"
+      ],
+      "default": "pending"
+    },
+    "expires_at": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "requester_id",
+    "recipient_id"
+  ]
+}

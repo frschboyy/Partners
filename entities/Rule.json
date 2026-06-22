@@ -1,0 +1,64 @@
+{
+  "name": "Rule",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "alcohol",
+        "smoking",
+        "junk_food",
+        "weight",
+        "running",
+        "gym",
+        "sugar",
+        "caffeine",
+        "social_media",
+        "custom"
+      ]
+    },
+    "penalty_amount": {
+      "type": "number",
+      "default": 0
+    },
+    "current_streak": {
+      "type": "number",
+      "default": 0
+    },
+    "longest_streak": {
+      "type": "number",
+      "default": 0
+    },
+    "last_slip_date": {
+      "type": "string"
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    },
+    "recurring_allowance": {
+      "type": "boolean",
+      "default": false
+    },
+    "allowance_interval_days": {
+      "type": "number"
+    },
+    "last_allowance_used": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "user_id",
+    "title",
+    "category"
+  ]
+}

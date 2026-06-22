@@ -1,0 +1,78 @@
+{
+  "name": "Post",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "type": "string"
+    },
+    "author_name": {
+      "type": "string"
+    },
+    "author_emoji": {
+      "type": "string"
+    },
+    "post_type": {
+      "type": "string",
+      "enum": [
+        "meal",
+        "workout",
+        "slip",
+        "milestone"
+      ],
+      "default": "meal"
+    },
+    "caption": {
+      "type": "string"
+    },
+    "photo_url": {
+      "type": "string"
+    },
+    "workout_type": {
+      "type": "string"
+    },
+    "workout_duration": {
+      "type": "number"
+    },
+    "rule_id": {
+      "type": "string"
+    },
+    "rule_title": {
+      "type": "string"
+    },
+    "penalty_applied": {
+      "type": "number",
+      "default": 0
+    },
+    "exemption_used": {
+      "type": "boolean",
+      "default": false
+    },
+    "exemption_name": {
+      "type": "string"
+    },
+    "summertides_active": {
+      "type": "boolean",
+      "default": false
+    },
+    "post_date": {
+      "type": "string"
+    },
+    "reactions": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "visible_to": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "user_id",
+    "post_type",
+    "post_date"
+  ]
+}

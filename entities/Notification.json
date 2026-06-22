@@ -1,0 +1,51 @@
+{
+  "name": "Notification",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "partner_request",
+        "request_accepted",
+        "request_declined",
+        "partnership_agreed",
+        "slip_witnessed",
+        "slip_confirmed",
+        "slip_disputed",
+        "new_message",
+        "summertides_declared",
+        "partner_removed"
+      ]
+    },
+    "title": {
+      "type": "string"
+    },
+    "body": {
+      "type": "string"
+    },
+    "read": {
+      "type": "boolean",
+      "default": false
+    },
+    "action_id": {
+      "type": "string"
+    },
+    "action_type": {
+      "type": "string"
+    },
+    "from_user_id": {
+      "type": "string"
+    },
+    "from_user_name": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "user_id",
+    "type",
+    "title"
+  ]
+}
