@@ -42,6 +42,7 @@ function MainApp({ user }) {
   const [profile, setProfile] = useState(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [activeTab, setActiveTab] = useState(() => localStorage.getItem('accountable_last_tab') || 'home');
+  const [prevTab, setPrevTab] = useState('home');
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [currentTheme, setCurrentTheme] = useState(() => getSavedTheme().theme);
   const [darkMode, setDarkMode] = useState(() => getSavedTheme().darkMode);
@@ -113,8 +114,11 @@ function MainApp({ user }) {
   }
 
   function handleTabChange(tab) {
+    if (tab !== 'notifications') {
+      setPrevTab(tab);
+      localStorage.setItem('accountable_last_tab', tab);
+    }
     setActiveTab(tab);
-    localStorage.setItem('accountable_last_tab', tab);
   }
 
   if (loadingProfile) {
@@ -136,7 +140,7 @@ function MainApp({ user }) {
           <NotificationsPanel
             currentUser={user}
             profile={profile}
-            onClose={() => { handleTabChange('home'); checkNotifications(); }}
+            onClose={() => { handleTabChange(prevTab); checkNotifications(); }}
             onNavigateToSettings={(section) => { handleTabChange('settings'); setSettingsSection(section || null); }}
           />
         )}
@@ -212,6 +216,13 @@ const AuthenticatedApp = () => {
   return <MainApp user={user} />;
 };
 
+function PublicRoute({ element }) {
+  const { isAuthenticated, isLoadingAuth, authChecked } = useAuth();
+  if (isLoadingAuth || !authChecked) return <LoadingScreen />;
+  if (isAuthenticated) return <Navigate to="/" replace />;
+  return element;
+}
+
 function App() {
   return (
     <AuthProvider>
@@ -219,8 +230,8 @@ function App() {
         <Router>
           <ScrollToTop />
           <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
+            <Route path="/login" element={<PublicRoute element={<Login />} />} />
+            <Route path="/register" element={<PublicRoute element={<Register />} />} />
             <Route element={<ProtectedRoute unauthenticatedElement={<Navigate to="/login" replace />} fallback={<LoadingScreen />} />}>
               <Route path="*" element={<AuthenticatedApp />} />
             </Route>

@@ -35,6 +35,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = async () => {
+    localStorage.removeItem('accountable_last_tab');
     await supabase.auth.signOut();
     window.location.href = '/login';
   };

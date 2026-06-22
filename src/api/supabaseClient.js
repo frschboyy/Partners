@@ -78,6 +78,7 @@ export const api = {
       if (error) throw error;
     },
     async logout() {
+      localStorage.removeItem('accountable_last_tab');
       await supabase.auth.signOut();
       window.location.href = '/login';
     },
