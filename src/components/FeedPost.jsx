@@ -350,7 +350,7 @@ export default function FeedPost({
           </motion.div>
         ) : (
           photoUrls[0] ? (
-            <img src={photoUrls[0]} alt="post" className="w-full h-full object-cover" loading="eager" decoding="async" fetchpriority="high" />
+            <img src={photoUrls[0]} alt="post" className="w-full h-full object-cover" loading="eager" decoding="async" fetchPriority="high" />
           ) : (
             <div className="w-full h-full flex items-center justify-center" style={{ background: 'linear-gradient(135deg, hsl(var(--theme-accent-muted)), hsl(var(--card)))' }}>
               <span className="text-8xl opacity-30">{postEmoji(post)}</span>

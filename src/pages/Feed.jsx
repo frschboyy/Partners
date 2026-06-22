@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { api, supabase } from '@/api/supabaseClient';
 import LocketFeed from '@/components/LocketFeed';
 import { motion } from 'framer-motion';
