@@ -1,13 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { api } from '@/api/supabaseClient';
-import { motion, AnimatePresence } from 'framer-motion';
+import { api, supabase } from '@/api/supabaseClient';
+import { motion } from 'framer-motion';
 import { X, Bell } from 'lucide-react';
 
 export default function NotificationsPanel({ currentUser, profile, onClose, onNavigateToSettings }) {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [pendingSlips, setPendingSlips] = useState([]);
-  const [pendingRequests, setPendingRequests] = useState([]);
 
   const needsSetPassword =
     !currentUser?.identities?.some(i => i.provider === 'email') &&
@@ -15,19 +14,21 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
 
   useEffect(() => {
     loadAll();
+    const unsubs = [
+      api.entities.Notification.subscribe(() => loadAll()),
+      api.entities.Slip.subscribe(() => loadAll()),
+    ];
+    return () => unsubs.forEach(fn => fn());
   }, []);
 
   async function loadAll() {
     setLoading(true);
-    const [notifs, slips, requests] = await Promise.all([
+    const [notifs, slips] = await Promise.all([
       api.entities.Notification.filter({ user_id: currentUser.id }, '-created_at', 30),
       api.entities.Slip.filter({ user_id: currentUser.id, status: 'pending_confirmation' }),
-      api.entities.PartnerRequest.filter({ recipient_id: currentUser.id, status: 'pending' }),
     ]);
     setNotifications(notifs);
     setPendingSlips(slips);
-    setPendingRequests(requests);
-    // Mark all as read
     await Promise.all(notifs.filter(n => !n.read).map(n =>
       api.entities.Notification.update(n.id, { read: true })
     ));
@@ -45,7 +46,7 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
     if (slip.reporter_id) {
       const name = profile?.display_name || 'Your partner';
       const penaltyNote = slip.penalty_amount > 0 ? ` — ${slip.penalty_amount} KSH penalty applied` : '';
-      await api.entities.Notification.create({
+      await supabase.from('notifications').insert({
         user_id: slip.reporter_id,
         type: 'slip_confirmed',
         title: 'Slip confirmed',
@@ -62,7 +63,7 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
     await api.entities.Slip.update(slip.id, { status: 'disputed' });
     if (slip.reporter_id) {
       const name = profile?.display_name || 'Your partner';
-      await api.entities.Notification.create({
+      await supabase.from('notifications').insert({
         user_id: slip.reporter_id,
         type: 'slip_disputed',
         title: 'Slip disputed',
@@ -73,42 +74,6 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
       });
     }
     setPendingSlips(prev => prev.filter(s => s.id !== slip.id));
-  }
-
-  async function handleAcceptRequest(req) {
-    await api.entities.Partnership.create({
-      user_a_id: req.requester_id,
-      user_b_id: currentUser.id,
-      user_a_name: req.requester_name,
-      user_b_name: profile?.display_name || currentUser.full_name,
-      status: 'negotiating',
-      request_id: req.id,
-    });
-    await api.entities.PartnerRequest.update(req.id, { status: 'accepted' });
-    await api.entities.Notification.create({
-      user_id: req.requester_id,
-      type: 'request_accepted',
-      title: `${profile?.display_name || 'Your request'} was accepted!`,
-      body: 'Chat is now open. Discuss and agree on your terms.',
-      from_user_id: currentUser.id,
-      from_user_name: profile?.display_name,
-      read: false,
-    });
-    setPendingRequests(prev => prev.filter(r => r.id !== req.id));
-  }
-
-  async function handleDeclineRequest(req) {
-    await api.entities.PartnerRequest.update(req.id, { status: 'declined' });
-    await api.entities.Notification.create({
-      user_id: req.requester_id,
-      type: 'request_declined',
-      title: 'Partner request declined',
-      body: `${profile?.display_name || 'Someone'} declined your partnership request.`,
-      from_user_id: currentUser.id,
-      from_user_name: profile?.display_name,
-      read: false,
-    });
-    setPendingRequests(prev => prev.filter(r => r.id !== req.id));
   }
 
   const typeIcons = {
@@ -123,6 +88,8 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
     summertides_declared: '🌊',
     partner_removed: '👋',
   };
+
+  const isEmpty = !loading && notifications.length === 0 && pendingSlips.length === 0 && !needsSetPassword;
 
   return (
     <motion.div
@@ -159,34 +126,6 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
           </div>
         )}
 
-        {/* Pending partner requests */}
-        {pendingRequests.map(req => (
-          <div key={req.id} className="card-brutal-accent p-4 space-y-3">
-            <div className="flex gap-2">
-              <span className="text-2xl">🤝</span>
-              <div>
-                <p className="font-bold text-sm">Partnership request from <span className="text-accent-custom">{req.requester_name}</span></p>
-                {req.intro_message && <p className="text-sm text-muted-foreground mt-1 italic">"{req.intro_message}"</p>}
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => handleAcceptRequest(req)}
-                className="flex-1 py-2 rounded-lg font-bold text-sm"
-                style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
-              >
-                Accept ✓
-              </button>
-              <button
-                onClick={() => handleDeclineRequest(req)}
-                className="flex-1 py-2 rounded-lg font-semibold text-sm bg-secondary text-foreground"
-              >
-                Decline ✕
-              </button>
-            </div>
-          </div>
-        ))}
-
         {/* Pending slip confirmations */}
         {pendingSlips.map(slip => (
           <div key={slip.id} className="card-brutal-accent p-4 space-y-3">
@@ -222,7 +161,7 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
           <div className="flex items-center justify-center py-8">
             <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
           </div>
-        ) : notifications.length === 0 && pendingSlips.length === 0 && pendingRequests.length === 0 ? (
+        ) : isEmpty ? (
           <div className="flex flex-col items-center justify-center py-16 gap-3">
             <p className="text-4xl">🔔</p>
             <p className="font-semibold">All caught up</p>

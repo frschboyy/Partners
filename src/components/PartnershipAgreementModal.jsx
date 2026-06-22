@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Plus, Trash2, CheckCircle, Send, Lock, RefreshCw } from 'lucide-react';
-import { api } from '@/api/supabaseClient';
+import { api, supabase } from '@/api/supabaseClient';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export default function PartnershipAgreementModal({ partnership, currentUserId, currentUserRules = [], onClose, onAgreed }) {
@@ -64,7 +64,7 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
       last_proposer_id: currentUserId,
     });
     const partnerId = isUserA ? partnership.user_b_id : partnership.user_a_id;
-    await api.entities.Notification.create({
+    await supabase.from('notifications').insert({
       user_id: partnerId,
       type: 'partnership_agreed',
       title: `${myName} sent a proposal`,
@@ -88,21 +88,21 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
       status: 'active',
       agreed_at: new Date().toISOString(),
     });
-    await Promise.all([
-      api.entities.Notification.create({
+    await supabase.from('notifications').insert([
+      {
         user_id: partnership.user_a_id,
         type: 'partnership_agreed',
         title: '🎉 Partnership locked in!',
         body: `You and ${partnership.user_b_name} are now accountability partners.`,
         read: false,
-      }),
-      api.entities.Notification.create({
+      },
+      {
         user_id: partnership.user_b_id,
         type: 'partnership_agreed',
         title: '🎉 Partnership locked in!',
         body: `You and ${partnership.user_a_name} are now accountability partners.`,
         read: false,
-      }),
+      },
     ]);
     setSaving(false);
     onAgreed?.();
@@ -119,7 +119,7 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
       status: 'negotiating',
     });
     const partnerId = isUserA ? partnership.user_b_id : partnership.user_a_id;
-    await api.entities.Notification.create({
+    await supabase.from('notifications').insert({
       user_id: partnerId,
       type: 'partnership_proposal',
       title: `${myName} wants to renegotiate`,

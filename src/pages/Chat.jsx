@@ -16,7 +16,10 @@ export default function Chat({ currentUser, profile }) {
   const bottomRef = useRef(null);
 
   useEffect(() => {
-    if (currentUser) loadPartnerships();
+    if (!currentUser) return;
+    loadPartnerships();
+    const unsub = api.entities.Partnership.subscribe(() => loadPartnerships());
+    return unsub;
   }, [currentUser]);
 
   useEffect(() => {

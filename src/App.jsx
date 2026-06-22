@@ -14,6 +14,8 @@ import { applyTheme, getSavedTheme, saveTheme } from '@/lib/theme';
 // Pages
 import Login from './pages/Login';
 import Register from './pages/Register';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import Onboarding from './pages/Onboarding';
 import Home from './pages/Home';
 import Feed from './pages/Feed';
@@ -64,8 +66,7 @@ function MainApp({ user }) {
     const unsub = api.entities.ChatMessage.subscribe(() => checkUnread());
     const unsub2 = api.entities.Notification.subscribe(() => checkNotifications());
     const unsub3 = api.entities.Slip.subscribe(() => checkNotifications());
-    const unsub4 = api.entities.PartnerRequest.subscribe(() => checkNotifications());
-    return () => { unsub(); unsub2(); unsub3(); unsub4(); };
+    return () => { unsub(); unsub2(); unsub3(); };
   
   }, [user]);
 
@@ -89,15 +90,14 @@ function MainApp({ user }) {
   }
 
   async function checkNotifications() {
-    const [notifs, pendingSlips, pendingRequests] = await Promise.all([
+    const [notifs, pendingSlips] = await Promise.all([
       api.entities.Notification.filter({ user_id: user.id, read: false }),
       api.entities.Slip.filter({ user_id: user.id, status: 'pending_confirmation' }),
-      api.entities.PartnerRequest.filter({ recipient_id: user.id, status: 'pending' }),
     ]);
     const needsPassword =
       !user.identities?.some(i => i.provider === 'email') &&
       !user.user_metadata?.has_set_password;
-    setUnreadNotifications(notifs.length + pendingSlips.length + pendingRequests.length + (needsPassword ? 1 : 0));
+    setUnreadNotifications(notifs.length + pendingSlips.length + (needsPassword ? 1 : 0));
   }
 
   async function checkUnread() {
@@ -232,6 +232,8 @@ function App() {
           <Routes>
             <Route path="/login" element={<PublicRoute element={<Login />} />} />
             <Route path="/register" element={<PublicRoute element={<Register />} />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route element={<ProtectedRoute unauthenticatedElement={<Navigate to="/login" replace />} fallback={<LoadingScreen />} />}>
               <Route path="*" element={<AuthenticatedApp />} />
             </Route>

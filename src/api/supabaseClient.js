@@ -38,7 +38,8 @@ export function entityClient(tableName) {
       if (error) throw error;
     },
     subscribe(callback) {
-      const channel = supabase.channel(`${tableName}-changes`)
+      const channelName = `${tableName}-${Math.random().toString(36).slice(2)}`;
+      const channel = supabase.channel(channelName)
         .on('postgres_changes', { event: '*', schema: 'public', table: tableName },
           payload => callback({ type: payload.eventType, id: payload.new?.id || payload.old?.id, data: payload.new })
         ).subscribe();

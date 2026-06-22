@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Compass, Flame, Star, ChevronDown, UserX, Eye, AlertTriangle } from 'lucide-react';
 import PartnershipFinancials from '@/components/PartnershipFinancials';
-import { api } from '@/api/supabaseClient';
+import { api, supabase } from '@/api/supabaseClient';
 import { motion, AnimatePresence } from 'framer-motion';
 import Avatar from '@/components/Avatar';
 import RuleCard from '@/components/RuleCard';
@@ -24,6 +24,8 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
   const [showAgreement, setShowAgreement] = useState(null);
   const [reportSlip, setReportSlip] = useState(null);
   const [removePartner, setRemovePartner] = useState(null);
+  const [removing, setRemoving] = useState(false);
+  const [toast, setToast] = useState(null);
   const [summertidesDecl, setSummertidesDecl] = useState(null);
   const [showSummertides, setShowSummertides] = useState(false);
 
@@ -31,8 +33,21 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
   const isSummertidesWindow = today.getMonth() === 6 && today.getDate() >= 1 && today.getDate() <= 6;
 
   useEffect(() => {
-    if (currentUser) loadAll();
+    if (!currentUser) return;
+    loadAll();
+    const unsubs = [
+      api.entities.Partnership.subscribe(() => loadAll()),
+      api.entities.PartnerRequest.subscribe(() => loadAll()),
+      api.entities.Rule.subscribe(() => loadAll()),
+    ];
+    return () => unsubs.forEach(fn => fn());
   }, [currentUser]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   async function loadAll() {
     setLoading(true);
@@ -67,12 +82,22 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
     setMyPosts(posts);
   }
 
+  async function confirmRemove() {
+    if (!removePartner) return;
+    setRemoving(true);
+    const name = removePartner.partnerName;
+    await handleRemovePartner(removePartner.partnership);
+    setRemoving(false);
+    setRemovePartner(null);
+    setToast(`${name} has been removed.`);
+  }
+
   async function handleRemovePartner(partnership) {
     await api.entities.Partnership.update(partnership.id, {
       status: 'dissolved',
       dissolved_at: new Date().toISOString(),
     });
-    await api.entities.Notification.create({
+    await supabase.from('notifications').insert({
       user_id: partnership.user_a_id === currentUser.id ? partnership.user_b_id : partnership.user_a_id,
       type: 'partner_removed',
       title: 'Partnership ended',
@@ -98,7 +123,9 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
   const vibeScore = profile?.vibe_score || 0;
   const activePartners = partnerships.filter(p => p.status === 'active');
   const negotiatingPartners = partnerships.filter(p => p.status === 'negotiating');
-  const partnerUserIds = activePartners.map(p => p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id);
+  const partnerUserIds = [...activePartners, ...negotiatingPartners].map(
+    p => p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id
+  );
 
   return (
     <div className="flex flex-col min-h-screen bg-background pb-24">
@@ -218,24 +245,37 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
           </div>
 
           {/* Negotiating partnerships */}
-          {negotiatingPartners.map(p => (
-            <div key={p.id} className="card-brutal p-3 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-accent-muted flex items-center justify-center text-xl">
-                {partnerProfiles[p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id]?.emoji_avatar || '🤝'}
+          {negotiatingPartners.map(p => {
+            const partnerName = p.user_a_id === currentUser.id ? p.user_b_name : p.user_a_name;
+            return (
+              <div key={p.id} className="card-brutal p-3 flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-accent-muted flex items-center justify-center text-xl">
+                  {partnerProfiles[p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id]?.emoji_avatar || '🤝'}
+                </div>
+                <div className="flex-1">
+                  <p className="font-semibold text-sm">{partnerName}</p>
+                  <p className="text-xs text-muted-foreground">Negotiating terms…</p>
+                </div>
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => setShowAgreement(p)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold"
+                    style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
+                  >
+                    Open Agreement
+                  </button>
+                  <motion.button
+                    whileTap={{ scale: 0.85 }}
+                    onClick={() => setRemovePartner({ partnership: p, partnerName })}
+                    className="p-2 rounded-lg bg-secondary text-muted-foreground"
+                    title="Cancel connection"
+                  >
+                    <UserX size={14} />
+                  </motion.button>
+                </div>
               </div>
-              <div className="flex-1">
-                <p className="font-semibold text-sm">{p.user_a_id === currentUser.id ? p.user_b_name : p.user_a_name}</p>
-                <p className="text-xs text-muted-foreground">Negotiating terms…</p>
-              </div>
-              <button
-                onClick={() => setShowAgreement(p)}
-                className="px-3 py-1.5 rounded-lg text-xs font-bold"
-                style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
-              >
-                Open Agreement
-              </button>
-            </div>
-          ))}
+            );
+          })}
 
           {/* Active partners */}
           {activePartners.length === 0 && negotiatingPartners.length === 0 && (
@@ -394,6 +434,7 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
           currentProfile={profile}
           existingPartnerIds={partnerUserIds}
           onClose={() => setShowDiscover(false)}
+          onPartnershipChanged={loadAll}
         />
       )}
       {showLogPost && (
@@ -432,10 +473,11 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
                   Cancel
                 </button>
                 <button
-                  onClick={() => { handleRemovePartner(removePartner.partnership); setRemovePartner(null); }}
-                  className="flex-1 py-2.5 rounded-xl font-bold text-sm bg-destructive text-destructive-foreground"
+                  onClick={confirmRemove}
+                  disabled={removing}
+                  className="flex-1 py-2.5 rounded-xl font-bold text-sm bg-destructive text-destructive-foreground disabled:opacity-60"
                 >
-                  Remove
+                  {removing ? 'Removing…' : 'Remove'}
                 </button>
               </div>
             </motion.div>
@@ -452,6 +494,22 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
           onAgreed={() => { setShowAgreement(null); loadAll(); }}
         />
       )}
+
+      {/* Toast */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            className="fixed bottom-28 left-0 right-0 flex justify-center z-[60] px-6 pointer-events-none"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 16 }}
+          >
+            <div className="bg-foreground text-background px-5 py-3 rounded-xl text-sm font-semibold shadow-xl">
+              {toast}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -477,7 +535,7 @@ function WitnessedSlipModal({ currentUser, profile, partnerName, partnerId, part
       slip_date: new Date().toISOString().split('T')[0],
       notes,
     });
-    await api.entities.Notification.create({
+    await supabase.from('notifications').insert({
       user_id: partnerId,
       type: 'slip_witnessed',
       title: `${profile?.display_name || 'Your partner'} reported a slip`,

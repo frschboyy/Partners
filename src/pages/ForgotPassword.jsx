@@ -11,18 +11,23 @@ export default function ForgotPassword() {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
+  const [error, setError] = useState("");
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
       await api.auth.resetPasswordRequest(email);
-    } catch {
-      // Always show success regardless
-    } finally {
-      setLoading(false);
-      setSent(true);
+    } catch (err) {
+      if (err.status === 429 || err.message?.toLowerCase().includes('rate limit')) {
+        setError("Too many requests. Please wait a few minutes before trying again.");
+        setLoading(false);
+        return;
+      }
+      // For all other errors show generic success (don't leak whether email exists)
     }
+    setLoading(false);
+    setSent(true);
   };
 
   return (
@@ -41,35 +46,42 @@ export default function ForgotPassword() {
           If an account exists with that email, you'll receive a password reset link shortly.
         </p>
       ) : (
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="email">Email address</Label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" aria-hidden="true" />
-              <Input
-                id="email"
-                type="email"
-                autoComplete="email"
-                autoFocus
-                placeholder="you@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="pl-10 h-12"
-                required
-              />
+        <>
+          {error && (
+            <div className="mb-4 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+              {error}
             </div>
-          </div>
-          <Button type="submit" className="w-full h-12 font-medium" disabled={loading}>
-            {loading ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Sending...
-              </>
-            ) : (
-              "Send reset link"
-            )}
-          </Button>
-        </form>
+          )}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="email">Email address</Label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" aria-hidden="true" />
+                <Input
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  autoFocus
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="pl-10 h-12"
+                  required
+                />
+              </div>
+            </div>
+            <Button type="submit" className="w-full h-12 font-medium" disabled={loading}>
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Sending...
+                </>
+              ) : (
+                "Send reset link"
+              )}
+            </Button>
+          </form>
+        </>
       )}
     </AuthLayout>
   );
