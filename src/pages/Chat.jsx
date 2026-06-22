@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { api, supabase } from '@/api/supabaseClient';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import Avatar from '@/components/Avatar';
-import { Send, ArrowLeft, Pencil, Trash2, Check, X as XIcon } from 'lucide-react';
+import ChatPicker from '@/components/ChatPicker';
+import { Send, ArrowLeft, Pencil, Trash2, Check, X as XIcon, Smile } from 'lucide-react';
 
 function formatTime(dateStr) {
   if (!dateStr) return '';
@@ -27,8 +28,14 @@ export default function Chat({ currentUser, profile }) {
   const [activeMessageId, setActiveMessageId] = useState(null);
   const [editingMessageId, setEditingMessageId] = useState(null);
   const [editText, setEditText] = useState('');
+  const [typingPartners, setTypingPartners] = useState({});
+  const [showPicker, setShowPicker] = useState(false);
   const bottomRef = useRef(null);
+  const pickerRef = useRef(null);
   const selectedPartnershipRef = useRef(null);
+  const typingChannelsRef = useRef({});
+  const typingTimersRef = useRef({});
+  const typingThrottleRef = useRef(null);
 
   useEffect(() => { selectedPartnershipRef.current = selectedPartnership; }, [selectedPartnership]);
 
@@ -38,24 +45,67 @@ export default function Chat({ currentUser, profile }) {
     const partnershipUnsub = api.entities.Partnership.subscribe(() => loadPartnerships());
 
     // Update the list view in real-time when any new message arrives
-    const msgUnsub = api.entities.ChatMessage.subscribe(event => {
-      if (event.type !== 'insert' || !event.data?.partnership_id) return;
+    const msgUnsub = api.entities.ChatMessage.subscribe(async event => {
+      if (!event.data?.partnership_id) return;
       const pid = event.data.partnership_id;
-      setLastActivity(prev => ({
-        ...prev,
-        [pid]: { time: event.data.created_at, text: event.data.content, senderId: event.data.sender_id },
-      }));
-      // Only bump unread if it's from the partner and we're not currently in that chat
-      if (
-        event.data.sender_id !== currentUser.id &&
-        selectedPartnershipRef.current?.id !== pid
-      ) {
-        setUnreadCounts(prev => ({ ...prev, [pid]: (prev[pid] || 0) + 1 }));
+
+      if (event.type === 'insert') {
+        setLastActivity(prev => ({
+          ...prev,
+          [pid]: { time: event.data.created_at, text: event.data.content, senderId: event.data.sender_id, msgType: event.data.message_type },
+        }));
+        if (
+          event.data.sender_id !== currentUser.id &&
+          selectedPartnershipRef.current?.id !== pid
+        ) {
+          setUnreadCounts(prev => ({ ...prev, [pid]: (prev[pid] || 0) + 1 }));
+        }
+      } else if (event.type === 'update' && event.data.is_deleted) {
+        // Soft-deleted message — re-fetch to find the new latest non-deleted message
+        const msgs = await api.entities.ChatMessage.filter({ partnership_id: pid }, '-created_at', 50);
+        const latest = msgs.find(m => !m.is_deleted);
+        setLastActivity(prev => ({
+          ...prev,
+          [pid]: latest
+            ? { time: latest.created_at, text: latest.content, senderId: latest.sender_id, msgType: latest.message_type }
+            : null,
+        }));
       }
     });
 
     return () => { partnershipUnsub(); msgUnsub(); };
   }, [currentUser]);
+
+  useEffect(() => {
+    Object.values(typingChannelsRef.current).forEach(ch => supabase.removeChannel(ch));
+    typingChannelsRef.current = {};
+    Object.values(typingTimersRef.current).forEach(clearTimeout);
+    typingTimersRef.current = {};
+
+    partnerships.forEach(p => {
+      const partnerId = p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id;
+
+      const ch = supabase
+        .channel(`typing-${p.id}`)
+        .on('presence', { event: 'sync' }, () => {
+          const state = ch.presenceState();
+          const partnerTyping = Object.values(state)
+            .flat()
+            .some(entry => entry.user_id === partnerId && entry.isTyping);
+          setTypingPartners(prev => ({ ...prev, [p.id]: partnerTyping }));
+        })
+        .subscribe();
+
+      typingChannelsRef.current[p.id] = ch;
+    });
+
+    return () => {
+      Object.values(typingChannelsRef.current).forEach(ch => supabase.removeChannel(ch));
+      typingChannelsRef.current = {};
+      Object.values(typingTimersRef.current).forEach(clearTimeout);
+      typingTimersRef.current = {};
+    };
+  }, [partnerships]);
 
   useEffect(() => {
     if (!selectedPartnership) return;
@@ -129,9 +179,10 @@ export default function Chat({ currentUser, profile }) {
     const activity = {};
     for (const p of myPartnerships) {
       const msgs = await api.entities.ChatMessage.filter({ partnership_id: p.id }, '-created_at', 50);
-      unread[p.id] = msgs.filter(m => !m.read_by?.includes(currentUser.id) && m.sender_id !== currentUser.id).length;
-      if (msgs.length > 0) {
-        activity[p.id] = { time: msgs[0].created_at, text: msgs[0].content, senderId: msgs[0].sender_id };
+      unread[p.id] = msgs.filter(m => !m.is_deleted && !m.read_by?.includes(currentUser.id) && m.sender_id !== currentUser.id).length;
+      const latest = msgs.find(m => !m.is_deleted);
+      if (latest) {
+        activity[p.id] = { time: latest.created_at, text: latest.content, senderId: latest.sender_id, msgType: latest.message_type };
       }
     }
     setUnreadCounts(unread);
@@ -165,11 +216,38 @@ export default function Chat({ currentUser, profile }) {
     await api.entities.ChatMessage.update(msg.id, { is_deleted: true });
   }
 
+  useEffect(() => {
+    if (!showPicker) return;
+    function onMouseDown(e) {
+      if (pickerRef.current && !pickerRef.current.contains(e.target)) {
+        setShowPicker(false);
+      }
+    }
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
+  }, [showPicker]);
+
+  async function sendMedia(previewUrl, fullUrl, type) {
+    if (!selectedPartnership) return;
+    setShowPicker(false);
+    await api.entities.ChatMessage.create({
+      partnership_id: selectedPartnership.id,
+      sender_id: currentUser.id,
+      sender_name: profile?.display_name || currentUser.full_name,
+      content: fullUrl || previewUrl,
+      message_type: type,
+      read_by: [currentUser.id],
+    });
+  }
+
   async function sendMessage() {
     if (!text.trim() || !selectedPartnership) return;
     setSending(true);
     const content = text.trim();
     setText('');
+    clearTimeout(typingThrottleRef.current);
+    const ch = typingChannelsRef.current[selectedPartnership.id];
+    if (ch) ch.track({ user_id: currentUser.id, isTyping: false });
     const msg = await api.entities.ChatMessage.create({
       partnership_id: selectedPartnership.id,
       sender_id: currentUser.id,
@@ -231,7 +309,7 @@ export default function Chat({ currentUser, profile }) {
           {messages.map(msg => {
             const isMe = msg.sender_id === currentUser.id;
             const ageMs = Date.now() - new Date(msg.created_at).getTime();
-            const canEdit = isMe && !msg.is_deleted && msg.message_type !== 'system' && ageMs < 5 * 60 * 1000;
+            const canEdit = isMe && !msg.is_deleted && msg.message_type === 'text' && ageMs < 5 * 60 * 1000;
             const canDelete = isMe && !msg.is_deleted && msg.message_type !== 'system' && ageMs < 30 * 60 * 1000;
             const showActions = activeMessageId === msg.id && !editingMessageId;
             const isEditing = editingMessageId === msg.id;
@@ -243,50 +321,66 @@ export default function Chat({ currentUser, profile }) {
                 animate={{ opacity: 1, y: 0 }}
                 className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
               >
-                <div
-                  className={`max-w-[78%] px-3.5 py-2.5 rounded-2xl ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
-                  style={{
-                    background: isMe ? 'hsl(var(--theme-accent))' : 'hsl(var(--secondary))',
-                    color: isMe ? 'hsl(var(--theme-accent-fg))' : 'hsl(var(--foreground))',
-                    cursor: (canEdit || canDelete) ? 'pointer' : 'default',
-                  }}
-                  onClick={() => {
-                    if (canEdit || canDelete) setActiveMessageId(p => p === msg.id ? null : msg.id);
-                  }}
-                >
-                  {msg.is_deleted ? (
-                    <p className="text-xs italic opacity-50">Message deleted</p>
-                  ) : msg.message_type === 'system' ? (
-                    <p className="text-xs italic opacity-70">{msg.content}</p>
-                  ) : isEditing ? (
-                    <div className="flex items-center gap-2 min-w-[160px]">
-                      <input
-                        autoFocus
-                        className="bg-transparent border-none outline-none text-sm flex-1 min-w-0"
-                        style={{ color: 'inherit' }}
-                        value={editText}
-                        onChange={e => setEditText(e.target.value)}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') saveEdit(msg);
-                          if (e.key === 'Escape') setEditingMessageId(null);
-                        }}
-                      />
-                      <button onClick={e => { e.stopPropagation(); saveEdit(msg); }} className="opacity-80 flex-shrink-0">
-                        <Check size={14} />
-                      </button>
-                      <button onClick={e => { e.stopPropagation(); setEditingMessageId(null); }} className="opacity-80 flex-shrink-0">
-                        <XIcon size={14} />
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <p className="text-sm leading-relaxed">{msg.content}</p>
-                      <p className="text-[10px] opacity-60 mt-0.5 text-right">
-                        {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </p>
-                    </>
-                  )}
-                </div>
+                {(msg.message_type === 'gif' || msg.message_type === 'sticker') && !msg.is_deleted ? (
+                  <div
+                    className={`max-w-[220px] rounded-2xl overflow-hidden ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
+                    style={{ cursor: canDelete ? 'pointer' : 'default' }}
+                    onClick={() => { if (canDelete) setActiveMessageId(p => p === msg.id ? null : msg.id); }}
+                  >
+                    <img
+                      src={msg.content}
+                      alt={msg.message_type}
+                      className="w-full"
+                      style={{ maxHeight: msg.message_type === 'sticker' ? 120 : 160, objectFit: 'cover', display: 'block' }}
+                      loading="lazy"
+                    />
+                  </div>
+                ) : (
+                  <div
+                    className={`max-w-[78%] px-3.5 py-2.5 rounded-2xl ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
+                    style={{
+                      background: isMe ? 'hsl(var(--theme-accent))' : 'hsl(var(--secondary))',
+                      color: isMe ? 'hsl(var(--theme-accent-fg))' : 'hsl(var(--foreground))',
+                      cursor: (canEdit || canDelete) ? 'pointer' : 'default',
+                    }}
+                    onClick={() => {
+                      if (canEdit || canDelete) setActiveMessageId(p => p === msg.id ? null : msg.id);
+                    }}
+                  >
+                    {msg.is_deleted ? (
+                      <p className="text-xs italic opacity-50">Message deleted</p>
+                    ) : msg.message_type === 'system' ? (
+                      <p className="text-xs italic opacity-70">{msg.content}</p>
+                    ) : isEditing ? (
+                      <div className="flex items-center gap-2 min-w-[160px]">
+                        <input
+                          autoFocus
+                          className="bg-transparent border-none outline-none text-sm flex-1 min-w-0"
+                          style={{ color: 'inherit' }}
+                          value={editText}
+                          onChange={e => setEditText(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') saveEdit(msg);
+                            if (e.key === 'Escape') setEditingMessageId(null);
+                          }}
+                        />
+                        <button onClick={e => { e.stopPropagation(); saveEdit(msg); }} className="opacity-80 flex-shrink-0">
+                          <Check size={14} />
+                        </button>
+                        <button onClick={e => { e.stopPropagation(); setEditingMessageId(null); }} className="opacity-80 flex-shrink-0">
+                          <XIcon size={14} />
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <p className="text-sm leading-relaxed">{msg.content}</p>
+                        <p className="text-[10px] opacity-60 mt-0.5 text-right">
+                          {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      </>
+                    )}
+                  </div>
+                )}
                 {showActions && (
                   <div className="flex gap-1.5 mt-1">
                     {canEdit && (
@@ -311,27 +405,83 @@ export default function Chat({ currentUser, profile }) {
               </motion.div>
             );
           })}
+          {typingPartners[selectedPartnership.id] && (
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex items-start"
+            >
+              <div className="px-3.5 py-3 rounded-2xl rounded-bl-sm bg-secondary">
+                <div className="flex gap-1 items-center">
+                  {[0, 1, 2].map(i => (
+                    <motion.div
+                      key={i}
+                      className="w-1.5 h-1.5 rounded-full bg-muted-foreground"
+                      animate={{ y: [0, -4, 0] }}
+                      transition={{ duration: 0.5, repeat: Infinity, delay: i * 0.15, ease: 'easeInOut' }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </motion.div>
+          )}
           <div ref={bottomRef} />
         </div>
 
         {/* Input — sits above bottom nav (nav is ~56px + safe area) */}
-        <div className="flex gap-2 px-4 py-3 border-t border-border flex-shrink-0 pb-20">
-          <input
-            className="flex-1 bg-input border border-border rounded-full px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-            placeholder="Message…"
-            value={text}
-            onChange={e => setText(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-          />
-          <motion.button
-            whileTap={{ scale: 0.85 }}
-            onClick={sendMessage}
-            disabled={sending || !text.trim()}
-            className="w-10 h-10 rounded-full flex items-center justify-center disabled:opacity-40"
-            style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
-          >
-            <Send size={16} />
-          </motion.button>
+        <div className="relative flex-shrink-0 border-t border-border" ref={pickerRef}>
+          <AnimatePresence>
+            {showPicker && (
+              <ChatPicker
+                onEmojiSelect={emoji => { setText(prev => prev + emoji); setShowPicker(false); }}
+                onMediaSelect={sendMedia}
+              />
+            )}
+          </AnimatePresence>
+          <div className="flex items-center gap-2 px-4 py-3 pb-20">
+            <motion.button
+              whileTap={{ scale: 0.85 }}
+              onClick={() => setShowPicker(p => !p)}
+              className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
+              style={showPicker
+                ? { background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }
+                : { background: 'hsl(var(--secondary))', color: 'hsl(var(--muted-foreground))' }
+              }
+            >
+              <Smile size={18} />
+            </motion.button>
+            <input
+              className="flex-1 bg-input border border-border rounded-full px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              placeholder="Message…"
+              value={text}
+              onChange={e => {
+                setText(e.target.value);
+                const ch = typingChannelsRef.current[selectedPartnership.id];
+                if (!ch) return;
+                if (e.target.value) {
+                  ch.track({ user_id: currentUser.id, isTyping: true });
+                  clearTimeout(typingThrottleRef.current);
+                  typingThrottleRef.current = setTimeout(() => {
+                    ch.track({ user_id: currentUser.id, isTyping: false });
+                  }, 3000);
+                } else {
+                  clearTimeout(typingThrottleRef.current);
+                  ch.track({ user_id: currentUser.id, isTyping: false });
+                }
+              }}
+              onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
+              onFocus={() => setShowPicker(false)}
+            />
+            <motion.button
+              whileTap={{ scale: 0.85 }}
+              onClick={sendMessage}
+              disabled={sending || !text.trim()}
+              className="w-10 h-10 rounded-full flex items-center justify-center disabled:opacity-40 flex-shrink-0"
+              style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
+            >
+              <Send size={16} />
+            </motion.button>
+          </div>
         </div>
       </div>
     );
@@ -364,11 +514,17 @@ export default function Chat({ currentUser, profile }) {
             const partnerProfile = partnerProfiles[partnerId];
             const unread = unreadCounts[p.id] || 0;
             const activity = lastActivity[p.id];
-            const preview = p.status === 'negotiating'
-              ? '📋 Negotiating terms'
-              : activity
-                ? (activity.senderId === currentUser.id ? `You: ${activity.text}` : activity.text)
-                : 'Tap to open chat';
+            const isTyping = !!typingPartners[p.id] && p.status !== 'negotiating';
+            const activityText = activity
+              ? activity.msgType === 'gif' ? '🎞 GIF'
+              : activity.msgType === 'sticker' ? '✨ Sticker'
+              : activity.senderId === currentUser.id ? `You: ${activity.text}` : activity.text
+              : null;
+            const preview = isTyping
+              ? `${partnerName.split(' ')[0]} is typing…`
+              : p.status === 'negotiating'
+                ? '📋 Negotiating terms'
+                : activityText || 'Tap to open chat';
 
             return (
               <motion.button
@@ -386,7 +542,10 @@ export default function Chat({ currentUser, profile }) {
                     )}
                   </div>
                   <div className="flex items-center justify-between gap-2 mt-0.5">
-                    <p className={`text-xs truncate ${unread > 0 ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
+                    <p
+                      className={`text-xs truncate ${isTyping ? 'font-medium' : unread > 0 ? 'text-foreground font-medium' : 'text-muted-foreground'}`}
+                      style={isTyping ? { color: 'hsl(var(--theme-accent))' } : undefined}
+                    >
                       {preview}
                     </p>
                     {unread > 0 && (
