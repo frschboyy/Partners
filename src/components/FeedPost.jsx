@@ -751,7 +751,7 @@ export default function FeedPost({
                     return (
                       <div key={msg.id} className={`flex gap-3 ${isReply ? 'pl-11' : ''}`}>
                         <div className="flex-shrink-0 mt-0.5">
-                          <Avatar profile={msgAuthorProfile} size="xs" />
+                          <Avatar profile={msgAuthorProfile} size="xs" noAutoFlip />
                         </div>
                         <div className="flex-1 min-w-0">
                           {isEditingThis ? (

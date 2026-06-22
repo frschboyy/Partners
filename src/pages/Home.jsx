@@ -253,7 +253,7 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
             return (
               <div key={p.id} className="card-brutal p-3">
                 <div className="flex items-center gap-3">
-                  <Avatar profile={partnerProfile} size="sm" />
+                  <Avatar profile={partnerProfile} size="sm" noAutoFlip />
                   <div className="flex-1">
                     <p className="font-semibold text-sm">{partnerName}</p>
                     <p className="text-xs text-muted-foreground">{p.penalty_amount > 0 ? `${p.penalty_amount} KSH / slip` : 'Honor system'} · Active</p>

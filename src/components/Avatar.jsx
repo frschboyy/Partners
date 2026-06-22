@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-export default function Avatar({ profile, size = 'md', className = '', onClick }) {
+export default function Avatar({ profile, size = 'md', className = '', onClick, noAutoFlip = false }) {
   const hasPhoto = !!profile?.photo_avatar_url;
   const hasEmoji = !!profile?.emoji_avatar;
   const canFlip = hasPhoto && hasEmoji;
@@ -19,12 +19,12 @@ export default function Avatar({ profile, size = 'md', className = '', onClick }
   };
   const sizeClass = sizes[size] || sizes.md;
 
-  // Auto-flip every 7 seconds when both photo and emoji exist
+  // Auto-flip every 7 seconds when both photo and emoji exist (disabled via noAutoFlip)
   useEffect(() => {
-    if (!canFlip) return;
+    if (!canFlip || noAutoFlip) return;
     const id = setInterval(() => setShowPhoto(v => !v), 7000);
     return () => clearInterval(id);
-  }, [canFlip]);
+  }, [canFlip, noAutoFlip]);
 
   // Auto-close expanded overlay
   useEffect(() => {

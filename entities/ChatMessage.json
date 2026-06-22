@@ -30,6 +30,15 @@
       "items": {
         "type": "string"
       }
+    },
+    "reply_to_id": {
+      "type": "string"
+    },
+    "liked_by": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [

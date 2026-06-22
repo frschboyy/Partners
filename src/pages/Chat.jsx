@@ -130,7 +130,7 @@ export default function Chat({ currentUser, profile }) {
           >
             <ArrowLeft size={18} />
           </motion.button>
-          <Avatar profile={partnerProfile} size="sm" />
+          <Avatar profile={partnerProfile} size="sm" noAutoFlip />
           <div>
             <p className="font-bold">{partnerName}</p>
             <p className="text-xs text-muted-foreground">Accountability partner</p>
@@ -231,7 +231,7 @@ export default function Chat({ currentUser, profile }) {
                 onClick={() => setSelectedPartnership(p)}
                 className="w-full flex items-center gap-3 p-4 card-brutal text-left"
               >
-                <Avatar profile={partnerProfile} size="sm" />
+                <Avatar profile={partnerProfile} size="sm" noAutoFlip />
                 <div className="flex-1 min-w-0">
                   <p className="font-bold text-sm">{partnerName}</p>
                   <p className="text-xs text-muted-foreground truncate">

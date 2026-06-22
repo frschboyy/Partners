@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { X, ChevronLeft, ChevronRight, Pencil, Trash2, MessageCircle, Smile, Send, Plus, Maximize2, Minimize2, CornerDownRight } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Pencil, Trash2, MessageCircle, Smile, Send, Plus, Maximize2, Minimize2, CornerDownRight, Home } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '@/api/supabaseClient';
 import { compressImage } from '@/lib/imageUtils';
@@ -45,6 +45,7 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
   const commentInputRef = useRef(null);
   const commentsBottomRef = useRef(null);
   const commentsScrollRef = useRef(null);
+  const touchStartX = useRef(null);
 
   const { message: toastMsg, show: showToast } = useToast();
 
@@ -218,7 +219,10 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
       setEditOverlayOpen(false);
       showToast('Post updated ✓');
       onRefresh?.();
-    } catch (_) {}
+    } catch (err) {
+      console.error('Post update failed:', err?.message || err);
+      showToast('Failed to save changes');
+    }
     setSaving(false);
   }
 
@@ -234,7 +238,7 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
 
   return (
     <motion.div
-      className="fixed inset-0 z-40 bg-background flex flex-col"
+      className="fixed inset-0 z-50 bg-background flex flex-col"
       initial={{ opacity: 0, y: '100%' }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: '100%' }}
@@ -244,39 +248,52 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
 
       {/* Header */}
-      <div className="flex items-center gap-2 p-4 border-b border-border flex-shrink-0">
-        <motion.button
-          whileTap={{ scale: 0.85 }}
-          onClick={focusedPost ? closePost : onClose}
-          className="p-2 rounded-full bg-secondary"
-        >
-          {focusedPost ? <ChevronLeft size={16} /> : <X size={16} />}
-        </motion.button>
-        <h2 className="font-bold flex-1">{focusedPost ? 'Post' : 'My Posts'}</h2>
-        {focusedPost && (
-          <div className="flex gap-1.5">
-            <motion.button whileTap={{ scale: 0.85 }} onClick={() => setShowReactions(s => !s)} className="p-2 rounded-full bg-secondary">
-              <Smile size={16} />
-            </motion.button>
-            <motion.button whileTap={{ scale: 0.85 }} onClick={openComments} className="p-2 rounded-full bg-secondary relative">
-              <MessageCircle size={16} />
-              {comments.filter(c => !c.reply_to_id).length > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-primary text-primary-foreground text-[9px] font-bold flex items-center justify-center">
-                  {comments.filter(c => !c.reply_to_id).length}
-                </span>
-              )}
-            </motion.button>
-            <motion.button whileTap={{ scale: 0.85 }} onClick={openEditOverlay} className="p-2 rounded-full bg-secondary">
-              <Pencil size={16} />
-            </motion.button>
-            <motion.button whileTap={{ scale: 0.85 }} onClick={() => setConfirmDelete(true)} className="p-2 rounded-full bg-destructive/10">
-              <Trash2 size={16} className="text-destructive" />
-            </motion.button>
-          </div>
-        )}
+      <div className="grid grid-cols-3 items-center px-4 py-3 border-b border-border flex-shrink-0">
+        <div>
+          <motion.button
+            whileTap={{ scale: 0.85 }}
+            onClick={focusedPost ? closePost : onClose}
+            className="p-2 rounded-full bg-secondary"
+          >
+            {focusedPost ? <ChevronLeft size={16} /> : <X size={16} />}
+          </motion.button>
+        </div>
+        <div className="flex justify-center">
+          <motion.button
+            whileTap={{ scale: 0.85 }}
+            onClick={onClose}
+            className="p-2 rounded-full bg-secondary"
+          >
+            <Home size={16} />
+          </motion.button>
+        </div>
+        <div className="flex justify-end gap-1.5">
+          {focusedPost && (
+            <>
+              <motion.button whileTap={{ scale: 0.85 }} onClick={() => setShowReactions(s => !s)} className="p-2 rounded-full bg-secondary">
+                <Smile size={16} />
+              </motion.button>
+              <motion.button whileTap={{ scale: 0.85 }} onClick={openComments} className="p-2 rounded-full bg-secondary relative">
+                <MessageCircle size={16} />
+                {comments.filter(c => !c.reply_to_id).length > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-primary text-primary-foreground text-[9px] font-bold flex items-center justify-center">
+                    {comments.filter(c => !c.reply_to_id).length}
+                  </span>
+                )}
+              </motion.button>
+              <motion.button whileTap={{ scale: 0.85 }} onClick={openEditOverlay} className="p-2 rounded-full bg-secondary">
+                <Pencil size={16} />
+              </motion.button>
+              <motion.button whileTap={{ scale: 0.85 }} onClick={() => setConfirmDelete(true)} className="p-2 rounded-full bg-destructive/10">
+                <Trash2 size={16} className="text-destructive" />
+              </motion.button>
+            </>
+          )}
+        </div>
       </div>
 
       <AnimatePresence mode="wait">
+
         {focusedPost ? (
           <motion.div
             key="focused"
@@ -286,12 +303,22 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
             exit={{ opacity: 0, x: 30 }}
           >
             {/* Image carousel */}
-            <div className="relative flex-1 bg-black overflow-hidden">
+            <div
+              className="relative flex-1 bg-black overflow-hidden"
+              onTouchStart={e => { touchStartX.current = e.touches[0].clientX; }}
+              onTouchEnd={e => {
+                if (touchStartX.current === null) return;
+                const delta = touchStartX.current - e.changedTouches[0].clientX;
+                if (delta > 40 && imageIndex < focusedPhotoUrls.length - 1) setImageIndex(i => i + 1);
+                else if (delta < -40 && imageIndex > 0) setImageIndex(i => i - 1);
+                touchStartX.current = null;
+              }}
+            >
               {focusedPhotoUrls.length > 0 ? (
                 <div
                   className="flex h-full"
                   style={{
-                    transform: `translateX(-${imageIndex * 100}%)`,
+                    transform: `translateX(-${(imageIndex * 100) / focusedPhotoUrls.length}%)`,
                     transition: 'transform 0.3s cubic-bezier(0.32,0.72,0,1)',
                     width: `${focusedPhotoUrls.length * 100}%`,
                   }}
@@ -482,7 +509,7 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
                       />
                     </div>
                   </div>
-                  <div className="p-4 border-t border-border flex gap-2 flex-shrink-0">
+                  <div className="p-4 border-t border-border flex gap-2 flex-shrink-0" style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
                     <button onClick={() => setEditOverlayOpen(false)} className="flex-1 py-2.5 rounded-xl bg-secondary text-sm font-semibold">Cancel</button>
                     <motion.button
                       whileTap={{ scale: 0.96 }} onClick={saveEdit} disabled={saving}
