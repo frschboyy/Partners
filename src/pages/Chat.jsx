@@ -451,6 +451,7 @@ export default function Chat({ currentUser, profile }) {
                 <ChatPicker
                   onEmojiSelect={emoji => { setText(prev => prev + emoji); setShowPicker(false); }}
                   onMediaSelect={sendMedia}
+                  currentUser={currentUser}
                 />
               </Suspense>
             )}

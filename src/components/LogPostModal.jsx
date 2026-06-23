@@ -8,7 +8,6 @@ import { useToast, Toast } from '@/components/Toast';
 const POST_TYPES = [
   { id: 'meal', label: '🍽️ Meal', desc: 'Log what you ate' },
   { id: 'workout', label: '💪 Workout', desc: 'Log your training' },
-  { id: 'slip', label: '😔 Slip', desc: 'Own it honestly' },
 ];
 
 // Groq cold-start can take ~8s; add network overhead and leave a comfortable margin.
@@ -20,7 +19,6 @@ export default function LogPostModal({ currentUser, profile, rules = [], partner
   const [photoUrls, setPhotoUrls] = useState([]); // multi-photo array
   const [workoutType, setWorkoutType] = useState('');
   const [workoutDuration, setWorkoutDuration] = useState('');
-  const [slipRuleId, setSlipRuleId] = useState(rules[0]?.id || '');
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [voiceError, setVoiceError] = useState('');
@@ -142,14 +140,11 @@ export default function LogPostModal({ currentUser, profile, rules = [], partner
     setPhotoUrls(prev => prev.filter((_, i) => i !== idx));
   }
 
-  const requiresPhoto = postType !== 'slip';
-  const canSubmit = !saving
-    && (!requiresPhoto || photoUrls.length > 0)
-    && (postType !== 'slip' || rules.length > 0);
+  const canSubmit = !saving && photoUrls.length > 0;
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (requiresPhoto && photoUrls.length === 0) {
+    if (photoUrls.length === 0) {
       setPhotoError('Please add at least one photo before posting.');
       return;
     }
@@ -158,33 +153,6 @@ export default function LogPostModal({ currentUser, profile, rules = [], partner
     const visibleTo = [currentUser.id, ...partnerIds];
 
     try {
-      if (postType === 'slip') {
-        const rule = rules.find(r => r.id === slipRuleId);
-        const penalty = rule?.penalty_amount || 0;
-        await api.entities.Slip.create({
-          user_id: currentUser.id,
-          rule_id: slipRuleId,
-          rule_title: rule?.title || '',
-          penalty_amount: penalty,
-          slip_type: 'self',
-          status: 'confirmed',
-          slip_date: today,
-          notes: caption,
-        });
-        if (profile && penalty > 0) {
-          await api.entities.UserProfile.update(profile.id, {
-            total_owed: (profile.total_owed || 0) + penalty,
-          });
-        }
-        if (rule) {
-          await api.entities.Rule.update(slipRuleId, {
-            current_streak: 0,
-            last_slip_date: today,
-          });
-        }
-      }
-
-      // One post per log; all photos stored in photo_urls array, photo_url holds the first for thumbnail
       const postData = {
         user_id: currentUser.id,
         author_name: profile?.display_name || currentUser.full_name,
@@ -200,12 +168,6 @@ export default function LogPostModal({ currentUser, profile, rules = [], partner
       if (postType === 'workout') {
         postData.workout_type = workoutType;
         postData.workout_duration = Number(workoutDuration);
-      }
-      if (postType === 'slip') {
-        const rule = rules.find(r => r.id === slipRuleId);
-        postData.rule_id = slipRuleId;
-        postData.rule_title = rule?.title || '';
-        postData.penalty_applied = rule?.penalty_amount || 0;
       }
       await api.entities.Post.create(postData);
 
@@ -357,40 +319,8 @@ export default function LogPostModal({ currentUser, profile, rules = [], partner
               </>
             )}
 
-            {/* Slip rule selector */}
-            {postType === 'slip' && (
-              <div>
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Which rule did you break?</label>
-                {rules.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No rules set yet — add rules on your Home screen first.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {rules.map(r => (
-                      <motion.button
-                        key={r.id}
-                        type="button"
-                        whileTap={{ scale: 0.97 }}
-                        onClick={() => setSlipRuleId(r.id)}
-                        className={`w-full flex items-center gap-3 p-3 rounded-lg border text-left transition-all ${
-                          slipRuleId === r.id
-                            ? 'border-destructive bg-destructive/10 text-foreground'
-                            : 'border-border bg-secondary text-muted-foreground'
-                        }`}
-                      >
-                        <span className="font-medium text-sm">{r.title}</span>
-                        {r.penalty_amount > 0 && (
-                          <span className="ml-auto text-xs font-mono text-destructive">−{r.penalty_amount} KSH</span>
-                        )}
-                      </motion.button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Photo upload — multi-photo, mandatory for non-slip posts */}
-            {postType !== 'slip' && (
-              <div>
+            {/* Photo upload */}
+            <div>
                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block flex items-center gap-1">
                   Photos
                   <span className="text-destructive">*</span>
@@ -471,14 +401,13 @@ export default function LogPostModal({ currentUser, profile, rules = [], partner
                   onChange={handlePhotoUpload}
                 />
               </div>
-            )}
 
             <motion.button
               type="submit"
               whileTap={{ scale: 0.96 }}
               disabled={!canSubmit}
               onClick={() => {
-                if (requiresPhoto && photoUrls.length === 0) {
+                if (photoUrls.length === 0) {
                   setPhotoError('Please add at least one photo before posting.');
                 }
               }}

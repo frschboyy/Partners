@@ -32,10 +32,18 @@ export default function PartnershipFinancials({ partnership, currentUserId, curr
   const mySlips = slips.filter(s => s.user_id === currentUserId);
   const partnerSlips = slips.filter(s => s.user_id !== currentUserId);
 
-  const amountLost = mySlips.reduce((sum, s) => sum + (s.penalty_waived ? 0 : (s.penalty_amount || 0)), 0);
+  function effectivePenalty(s) {
+    if (s.penalty_waived) return 0;
+    return s.slip_type === 'self'
+      ? Math.round((s.penalty_amount || 0) * 0.5)
+      : (s.penalty_amount || 0);
+  }
+
+  const amountLost = mySlips.reduce((sum, s) => sum + effectivePenalty(s), 0);
   const amountGained = partnerSlips.reduce((sum, s) => sum + (s.penalty_waived ? 0 : (s.penalty_amount || 0)), 0);
   const net = amountGained - amountLost;
 
+  const netColumnLabel = net > 0 ? 'Owed' : net < 0 ? 'Debt' : 'Even';
   const netLabel = net < 0
     ? `You owe ${partnerName}`
     : net > 0
@@ -63,7 +71,7 @@ export default function PartnershipFinancials({ partnership, currentUserId, curr
             </p>
           </div>
           <div className="flex-1 text-center">
-            <p className="text-xs text-muted-foreground">Net</p>
+            <p className="text-xs text-muted-foreground">{netColumnLabel}</p>
             <p
               className={`font-bold text-sm font-display-mono ${net < 0 ? 'text-destructive' : net === 0 ? 'text-muted-foreground' : ''}`}
               style={net > 0 ? { color: 'hsl(var(--theme-accent))' } : {}}
@@ -91,25 +99,28 @@ export default function PartnershipFinancials({ partnership, currentUserId, curr
                   <p className="text-xs text-muted-foreground italic">No slips recorded 🎉</p>
                 ) : (
                   <div className="space-y-1.5">
-                    {mySlips.map(s => (
-                      <div key={s.id} className="flex items-start justify-between gap-2 bg-destructive/5 border border-destructive/20 rounded-lg px-3 py-2">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium truncate">
-                            Broke: <span className="text-destructive">{s.rule_title || 'Unknown rule'}</span>
-                          </p>
-                          <p className="text-[10px] text-muted-foreground mt-0.5">
-                            {formatDate(s.slip_date)}
-                            {s.slip_type === 'witnessed' ? ` · witnessed by ${partnerName}` : ' · self-reported'}
-                            {s.penalty_waived ? ' · waived' : ''}
+                    {mySlips.map(s => {
+                      const eff = effectivePenalty(s);
+                      return (
+                        <div key={s.id} className="flex items-start justify-between gap-2 bg-destructive/5 border border-destructive/20 rounded-lg px-3 py-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium truncate">
+                              Broke: <span className="text-destructive">{s.rule_title || 'Unknown rule'}</span>
+                            </p>
+                            <p className="text-[10px] text-muted-foreground mt-0.5">
+                              {formatDate(s.slip_date)}
+                              {s.slip_type === 'witnessed' ? ` · witnessed by ${partnerName}` : ' · self-reported (50%)'}
+                              {s.penalty_waived ? ' · waived' : ''}
+                            </p>
+                          </div>
+                          <p className="text-xs font-bold text-destructive whitespace-nowrap font-display-mono">
+                            {s.penalty_waived
+                              ? <span className="line-through opacity-50">-{eff}</span>
+                              : `-${eff}`}
                           </p>
                         </div>
-                        <p className="text-xs font-bold text-destructive whitespace-nowrap font-display-mono">
-                          {s.penalty_waived
-                            ? <span className="line-through opacity-50">-{s.penalty_amount}</span>
-                            : `-${s.penalty_amount}`}
-                        </p>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

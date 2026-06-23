@@ -64,11 +64,21 @@ export default function Leaderboard({ currentUser, profile }) {
 
       // Slips
       const userSlips = allSlips.filter(s => s.user_id === userId);
-      const selfSlips = userSlips.filter(s => s.slip_type === 'self' || s.reporter_id === userId);
+
+      // Deduplicate self-slips: one event may create one record per partnership
+      const selfSlipsRaw = userSlips.filter(s => s.slip_type === 'self');
+      const seenSelfSlipKeys = new Set();
+      const selfSlips = selfSlipsRaw.filter(s => {
+        const key = `${s.slip_date}-${s.rule_id || s.rule_title}`;
+        if (seenSelfSlipKeys.has(key)) return false;
+        seenSelfSlipKeys.add(key);
+        return true;
+      });
+
       const partnerSlips = userSlips.filter(s => s.slip_type === 'witnessed' || (s.reporter_id && s.reporter_id !== userId));
 
       const selfSlipCount = selfSlips.length;
-      // 50% penalty reduction for self-reported slips
+      // 50% penalty reduction for self-reported slips; penalty_amount stores the full agreed penalty
       const selfSlipPenalty = selfSlips.reduce((sum, s) => sum + (s.penalty_amount || 0) * 0.5, 0);
 
       const partnerSlipCount = partnerSlips.length;

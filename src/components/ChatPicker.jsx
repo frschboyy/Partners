@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import Picker from '@emoji-mart/react';
 import emojiData from '@emoji-mart/data';
 import { motion } from 'framer-motion';
+import { supabase } from '@/api/supabaseClient';
 
 const GIPHY_KEY = import.meta.env.VITE_GIPHY_API_KEY;
 const GIPHY_BASE = 'https://api.giphy.com/v1';
@@ -57,7 +58,128 @@ function MediaGrid({ results, loading, onSelect }) {
   );
 }
 
-export default function ChatPicker({ onEmojiSelect, onMediaSelect }) {
+function MyStickersTab({ currentUser, onSelect }) {
+  const [stickers, setStickers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [hoveredId, setHoveredId] = useState(null);
+  const fileInputRef = useRef(null);
+
+  const folder = `stickers/${currentUser?.id}`;
+
+  async function loadStickers() {
+    if (!currentUser?.id) return;
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.storage.from('uploads').list(folder, { limit: 100, sortBy: { column: 'created_at', order: 'desc' } });
+      if (error) throw error;
+      const files = (data || []).filter(f => f.name !== '.emptyFolderPlaceholder');
+      const urls = files.map(f => {
+        const { data: { publicUrl } } = supabase.storage.from('uploads').getPublicUrl(`${folder}/${f.name}`);
+        return { name: f.name, url: publicUrl };
+      });
+      setStickers(urls);
+    } catch {
+      setStickers([]);
+    }
+    setLoading(false);
+  }
+
+  useEffect(() => { loadStickers(); }, [currentUser?.id]);
+
+  async function handleUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file || !currentUser?.id) return;
+    const allowed = ['image/png', 'image/gif', 'image/webp', 'image/jpeg'];
+    if (!allowed.includes(file.type)) return;
+    setUploading(true);
+    try {
+      const ext = file.name.split('.').pop();
+      const path = `${folder}/${Date.now()}.${ext}`;
+      const { error } = await supabase.storage.from('uploads').upload(path, file, { upsert: false });
+      if (!error) await loadStickers();
+    } catch {}
+    setUploading(false);
+    e.target.value = '';
+  }
+
+  async function handleDelete(name) {
+    try {
+      await supabase.storage.from('uploads').remove([`${folder}/${name}`]);
+      setStickers(prev => prev.filter(s => s.name !== name));
+    } catch {}
+  }
+
+  if (loading) {
+    return (
+      <div className="grid grid-cols-3 gap-1.5 p-3">
+        {[...Array(6)].map((_, i) => (
+          <div key={i} className="aspect-square bg-secondary rounded-lg animate-pulse" />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="px-3 pt-2.5 pb-2 flex-shrink-0 flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">Your personal stickers</span>
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-full font-medium transition-opacity disabled:opacity-50"
+          style={{ background: 'hsl(var(--theme-accent))', color: 'white' }}
+        >
+          {uploading ? '…' : '+ Upload'}
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/gif,image/webp,image/jpeg"
+          className="hidden"
+          onChange={handleUpload}
+        />
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {stickers.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full gap-2 text-center px-6">
+            <span className="text-3xl">🖼️</span>
+            <p className="text-sm text-muted-foreground">No stickers yet. Upload your first one!</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-1.5 p-3">
+            {stickers.map(s => (
+              <div
+                key={s.name}
+                className="relative aspect-square bg-secondary rounded-lg overflow-hidden"
+                onMouseEnter={() => setHoveredId(s.name)}
+                onMouseLeave={() => setHoveredId(null)}
+              >
+                <button
+                  onClick={() => onSelect(s.url, s.url)}
+                  className="w-full h-full focus:outline-none"
+                >
+                  <img src={s.url} alt="" className="w-full h-full object-contain p-1" loading="lazy" />
+                </button>
+                {hoveredId === s.name && (
+                  <button
+                    onClick={() => handleDelete(s.name)}
+                    className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white text-xs flex items-center justify-center leading-none hover:bg-black/80 transition-colors"
+                    title="Delete sticker"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function ChatPicker({ onEmojiSelect, onMediaSelect, currentUser }) {
   const [tab, setTab] = useState('emoji');
   const [search, setSearch] = useState('');
   const [results, setResults] = useState([]);
@@ -94,6 +216,7 @@ export default function ChatPicker({ onEmojiSelect, onMediaSelect }) {
     { id: 'emoji', label: '😊 Emoji' },
     { id: 'gif', label: 'GIF' },
     { id: 'sticker', label: '✨ Sticker' },
+    { id: 'my-stickers', label: '⭐ Mine' },
   ];
 
   return (
@@ -184,6 +307,16 @@ export default function ChatPicker({ onEmojiSelect, onMediaSelect }) {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* My Stickers tab */}
+      {tab === 'my-stickers' && (
+        <div style={{ height: 340 }}>
+          <MyStickersTab
+            currentUser={currentUser}
+            onSelect={(preview, full) => onMediaSelect(preview, full, 'sticker')}
+          />
         </div>
       )}
     </motion.div>

@@ -12,6 +12,7 @@ import LogPostModal from '@/components/LogPostModal';
 import MyPostsOverlay from '@/components/MyPostsOverlay';
 import PartnershipAgreementModal from '@/components/PartnershipAgreementModal';
 import WitnessedSlipModal from '@/components/WitnessedSlipModal';
+import SelfSlipSection from '@/components/SelfSlipSection';
 import CheatGuard from '@/components/CheatGuard';
 import { SUMMERTIDES } from '@/lib/constants';
 
@@ -318,99 +319,110 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
             </motion.button>
           </div>
 
-          {/* Negotiating partnerships */}
-          {negotiatingPartners.map(p => {
-            const partnerName = p.user_a_id === currentUser.id ? p.user_b_name : p.user_a_name;
-            return (
-              <div key={p.id} className="card-brutal p-3 flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-accent-muted flex items-center justify-center text-xl">
-                  {partnerProfiles[p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id]?.emoji_avatar || '🤝'}
-                </div>
-                <div className="flex-1">
-                  <p className="font-semibold text-sm">{partnerName}</p>
-                  <p className="text-xs text-muted-foreground">Negotiating terms…</p>
-                </div>
-                <div className="flex gap-1">
-                  <button
-                    onClick={() => setShowAgreement(p)}
-                    className="px-3 py-1.5 rounded-lg text-xs font-bold"
-                    style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
-                  >
-                    Open Agreement
-                  </button>
-                  <motion.button
-                    whileTap={{ scale: 0.85 }}
-                    onClick={() => setRemovePartner({ partnership: p, partnerName })}
-                    className="p-2 rounded-lg bg-secondary text-muted-foreground"
-                    title="Cancel connection"
-                  >
-                    <UserX size={14} />
-                  </motion.button>
-                </div>
-              </div>
-            );
-          })}
-
-          {/* Active partners */}
-          {activePartners.length === 0 && negotiatingPartners.length === 0 && (
-            <div className="card-brutal p-6 text-center">
-              <p className="text-3xl mb-2">🔭</p>
-              <p className="font-semibold">No partners yet</p>
-              <p className="text-sm text-muted-foreground mt-1">Tap Discover to find your accountability crew.</p>
-            </div>
-          )}
-
-          {activePartners.map(p => {
-            const partnerId = p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id;
-            const partnerName = p.user_a_id === currentUser.id ? p.user_b_name : p.user_a_name;
-            const partnerProfile = partnerProfiles[partnerId];
-            return (
-              <div key={p.id} className="card-brutal p-3">
-                <div className="flex items-center gap-3">
-                  <Avatar profile={partnerProfile} size="sm" noAutoFlip />
+          {/* Fixed-height scrollable card list — sized to show ~2 cards */}
+          <div className="overflow-y-auto space-y-3" style={{ maxHeight: 384 }}>
+            {/* Negotiating partnerships */}
+            {negotiatingPartners.map(p => {
+              const partnerName = p.user_a_id === currentUser.id ? p.user_b_name : p.user_a_name;
+              return (
+                <div key={p.id} className="card-brutal p-3 flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-accent-muted flex items-center justify-center text-xl">
+                    {partnerProfiles[p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id]?.emoji_avatar || '🤝'}
+                  </div>
                   <div className="flex-1">
                     <p className="font-semibold text-sm">{partnerName}</p>
-                    <p className="text-xs text-muted-foreground">{p.penalty_amount > 0 ? `${p.penalty_amount} KSH / slip` : 'Honor system'} · Active</p>
+                    <p className="text-xs text-muted-foreground">Negotiating terms…</p>
                   </div>
                   <div className="flex gap-1">
-                    <motion.button
-                      whileTap={{ scale: 0.85 }}
+                    <button
                       onClick={() => setShowAgreement(p)}
-                      className="p-2 rounded-lg bg-secondary"
-                      title="View agreement"
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold"
+                      style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
                     >
-                      <Eye size={14} />
-                    </motion.button>
+                      Open Agreement
+                    </button>
                     <motion.button
                       whileTap={{ scale: 0.85 }}
                       onClick={() => setRemovePartner({ partnership: p, partnerName })}
                       className="p-2 rounded-lg bg-secondary text-muted-foreground"
+                      title="Cancel connection"
                     >
                       <UserX size={14} />
                     </motion.button>
                   </div>
                 </div>
-                {/* Per-partnership financials */}
-                <PartnershipFinancials
-                  partnership={p}
-                  currentUserId={currentUser.id}
-                  currentUserName={profile?.display_name || currentUser.full_name}
-                  partnerName={partnerName}
-                  currencyLabel={profile?.currency_label || 'KSH'}
-                />
-                {/* Report witnessed slip button */}
-                <div className="mt-2 pt-2 border-t border-border">
-                  <button
-                    onClick={() => setReportSlip({ partnership: p, partnerName, partnerId })}
-                    className="flex items-center gap-1.5 text-xs text-muted-foreground"
-                  >
-                    <AlertTriangle size={11} /> Report witnessed slip
-                  </button>
-                </div>
+              );
+            })}
+
+            {/* Empty state */}
+            {activePartners.length === 0 && negotiatingPartners.length === 0 && (
+              <div className="card-brutal p-6 text-center">
+                <p className="text-3xl mb-2">🔭</p>
+                <p className="font-semibold">No partners yet</p>
+                <p className="text-sm text-muted-foreground mt-1">Tap Discover to find your accountability crew.</p>
               </div>
-            );
-          })}
+            )}
+
+            {/* Active partners */}
+            {activePartners.map(p => {
+              const partnerId = p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id;
+              const partnerName = p.user_a_id === currentUser.id ? p.user_b_name : p.user_a_name;
+              const partnerProfile = partnerProfiles[partnerId];
+              return (
+                <div key={p.id} className="card-brutal p-3">
+                  <div className="flex items-center gap-3">
+                    <Avatar profile={partnerProfile} size="sm" noAutoFlip />
+                    <div className="flex-1">
+                      <p className="font-semibold text-sm">{partnerName}</p>
+                      <p className="text-xs text-muted-foreground">{p.penalty_amount > 0 ? `${p.penalty_amount} KSH / slip` : 'Honor system'} · Active</p>
+                    </div>
+                    <div className="flex gap-1">
+                      <motion.button
+                        whileTap={{ scale: 0.85 }}
+                        onClick={() => setShowAgreement(p)}
+                        className="p-2 rounded-lg bg-secondary"
+                        title="View agreement"
+                      >
+                        <Eye size={14} />
+                      </motion.button>
+                      <motion.button
+                        whileTap={{ scale: 0.85 }}
+                        onClick={() => setRemovePartner({ partnership: p, partnerName })}
+                        className="p-2 rounded-lg bg-secondary text-muted-foreground"
+                      >
+                        <UserX size={14} />
+                      </motion.button>
+                    </div>
+                  </div>
+                  <PartnershipFinancials
+                    partnership={p}
+                    currentUserId={currentUser.id}
+                    currentUserName={profile?.display_name || currentUser.full_name}
+                    partnerName={partnerName}
+                    currencyLabel={profile?.currency_label || 'KSH'}
+                  />
+                  <div className="mt-2 pt-2 border-t border-border">
+                    <button
+                      onClick={() => setReportSlip({ partnership: p, partnerName, partnerId })}
+                      className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                    >
+                      <AlertTriangle size={11} /> Report witnessed slip
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
+
+        {/* Self Slip section — always below Partners */}
+        <SelfSlipSection
+          currentUser={currentUser}
+          profile={profile}
+          rules={rules}
+          activePartnerships={activePartners}
+          partnerIds={partnerUserIds}
+        />
 
         {/* View My Posts */}
         <div>
