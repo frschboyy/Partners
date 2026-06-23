@@ -65,10 +65,10 @@ export default function Feed({ currentUser, profile }) {
       }
 
       setPosts(feedPosts);
+      setLoading(false);
 
+      // Secondary data — grid view and comment counts. Load after paint so the feed is visible immediately.
       const postIds = feedPosts.map(p => p.id);
-
-      // Grid view data and comment counts are independent — fetch in parallel
       const [allUserPostsResult, commentResult] = await Promise.all([
         supabase.from('posts').select('*').in('user_id', allowedUserIds)
           .order('created_at', { ascending: false }).limit(200),
@@ -92,8 +92,8 @@ export default function Feed({ currentUser, profile }) {
     } catch (err) {
       console.error('Failed to load feed:', err?.message || err);
       showFeedToast('Failed to load feed — please refresh');
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   if (loading) {
