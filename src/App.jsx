@@ -216,58 +216,46 @@ function MainApp({ user }) {
       </AnimatePresence>
       {/* Page content */}
       <div className="flex-1 overflow-hidden relative">
-        <AnimatePresence mode="wait" initial={false}>
-          {activeTab !== 'notifications' && (
-            <motion.div
-              key={activeTab}
-              initial={{ x: slideDir * 28, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={{ x: slideDir * -28, opacity: 0 }}
-              transition={{ duration: 0.18, ease: [0.32, 0.72, 0, 1] }}
-              className="absolute inset-0"
-            >
-              {activeTab === 'home' && (
-                <div className="h-full overflow-y-auto">
-                  <Home
-                    currentUser={user}
-                    profile={profile}
-                    onProfileUpdate={setProfile}
-                  />
-                </div>
-              )}
-              {activeTab === 'feed' && (
-                <div className="h-full">
-                  <Feed currentUser={user} profile={profile} />
-                </div>
-              )}
-              {activeTab === 'chat' && (
-                <div className="h-full overflow-y-auto">
-                  <Chat currentUser={user} profile={profile} />
-                </div>
-              )}
-              {activeTab === 'leaderboard' && (
-                <div className="h-full overflow-y-auto">
-                  <Leaderboard currentUser={user} profile={profile} />
-                </div>
-              )}
-              {activeTab === 'settings' && (
-                <div className="h-full overflow-y-auto">
-                  <Settings
-                    currentUser={user}
-                    profile={profile}
-                    onProfileUpdate={setProfile}
-                    currentTheme={currentTheme}
-                    darkMode={darkMode}
-                    onThemeChange={setCurrentTheme}
-                    onDarkModeChange={setDarkMode}
-                    scrollToSection={settingsSection}
-                    onSectionHandled={() => setSettingsSection(null)}
-                  />
-                </div>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {activeTab === 'home' && (
+          <div className="h-full overflow-y-auto">
+            <Home
+              currentUser={user}
+              profile={profile}
+              onProfileUpdate={setProfile}
+            />
+          </div>
+        )}
+        {activeTab === 'feed' && (
+          <div className="h-full">
+            <Feed currentUser={user} profile={profile} />
+          </div>
+        )}
+        {activeTab === 'chat' && (
+          <div className="h-full overflow-y-auto">
+            <Chat currentUser={user} profile={profile} />
+          </div>
+        )}
+        {activeTab === 'leaderboard' && (
+          <div className="h-full overflow-y-auto">
+            <Leaderboard currentUser={user} profile={profile} />
+          </div>
+        )}
+        {activeTab === 'settings' && (
+          <div className="h-full overflow-y-auto">
+            <Settings
+              currentUser={user}
+              profile={profile}
+              onProfileUpdate={setProfile}
+              currentTheme={currentTheme}
+              darkMode={darkMode}
+              onThemeChange={setCurrentTheme}
+              onDarkModeChange={setDarkMode}
+              scrollToSection={settingsSection}
+              onSectionHandled={() => setSettingsSection(null)}
+            />
+          </div>
+        )}
+        {activeTab === 'notifications' && <div className="h-full" />}
       </div>
 
       <BottomNav
