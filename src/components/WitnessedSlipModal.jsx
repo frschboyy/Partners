@@ -1,19 +1,34 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { api, supabase } from '@/api/supabaseClient';
 import { motion } from 'framer-motion';
 import { useToast, Toast } from '@/components/Toast';
 
-export default function WitnessedSlipModal({ currentUser, profile, partnerName, partnerId, partnership, rules, onClose }) {
+export default function WitnessedSlipModal({ currentUser, profile, partnerName, partnerId, partnership, onClose }) {
+  const [partnerRules, setPartnerRules] = useState([]);
+  const [loadingRules, setLoadingRules] = useState(true);
   const [selectedRuleId, setSelectedRuleId] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const { message: toastMessage, show: showToast } = useToast();
 
+  useEffect(() => {
+    async function fetchPartnerRules() {
+      try {
+        const fetched = await api.entities.Rule.filter({ user_id: partnerId });
+        setPartnerRules(fetched.filter(r => r.active));
+      } catch (err) {
+        console.error('Failed to load partner rules:', err?.message || err);
+      }
+      setLoadingRules(false);
+    }
+    fetchPartnerRules();
+  }, [partnerId]);
+
   async function submit() {
     if (!selectedRuleId) return;
     setSaving(true);
     try {
-      const rule = rules.find(r => r.id === selectedRuleId);
+      const rule = partnerRules.find(r => r.id === selectedRuleId);
       await api.entities.Slip.create({
         user_id: partnerId,
         reporter_id: currentUser.id,
@@ -30,7 +45,7 @@ export default function WitnessedSlipModal({ currentUser, profile, partnerName, 
         user_id: partnerId,
         type: 'slip_witnessed',
         title: `${profile?.display_name || 'Your partner'} reported a slip`,
-        body: `They say you broke: ${rules.find(r => r.id === selectedRuleId)?.title}. Confirm or dispute?`,
+        body: `They say you broke: ${rule?.title}. Confirm or dispute?`,
         from_user_id: currentUser.id,
         from_user_name: profile?.display_name,
         action_id: partnership.id,
@@ -65,15 +80,25 @@ export default function WitnessedSlipModal({ currentUser, profile, partnerName, 
 
         <div className="space-y-2">
           <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Which rule?</label>
-          {rules.map(r => (
-            <button
-              key={r.id}
-              onClick={() => setSelectedRuleId(r.id)}
-              className={`w-full text-left p-3 rounded-lg border text-sm transition-all ${selectedRuleId === r.id ? 'border-destructive bg-destructive/10' : 'border-border bg-secondary'}`}
-            >
-              {r.title}
-            </button>
-          ))}
+          {loadingRules ? (
+            <div className="space-y-2">
+              {[1, 2].map(i => (
+                <div key={i} className="h-11 rounded-lg bg-muted animate-pulse" />
+              ))}
+            </div>
+          ) : partnerRules.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-2">{partnerName} has no active rules.</p>
+          ) : (
+            partnerRules.map(r => (
+              <button
+                key={r.id}
+                onClick={() => setSelectedRuleId(r.id)}
+                className={`w-full text-left p-3 rounded-lg border text-sm transition-all ${selectedRuleId === r.id ? 'border-destructive bg-destructive/10' : 'border-border bg-secondary'}`}
+              >
+                {r.title}
+              </button>
+            ))
+          )}
         </div>
 
         <textarea

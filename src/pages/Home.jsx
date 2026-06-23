@@ -12,6 +12,7 @@ import LogPostModal from '@/components/LogPostModal';
 import MyPostsOverlay from '@/components/MyPostsOverlay';
 import PartnershipAgreementModal from '@/components/PartnershipAgreementModal';
 import WitnessedSlipModal from '@/components/WitnessedSlipModal';
+import CheatGuard from '@/components/CheatGuard';
 import { SUMMERTIDES } from '@/lib/constants';
 
 export default function Home({ currentUser, profile, onProfileUpdate }) {
@@ -28,6 +29,9 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
   const [showAgreement, setShowAgreement] = useState(null);
   const [reportSlip, setReportSlip] = useState(null);
   const [removePartner, setRemovePartner] = useState(null);
+  const [showGuard, setShowGuard] = useState(false);
+  const [editingStat, setEditingStat] = useState(null); // 'streak' | 'vibe' | null
+  const [editValue, setEditValue] = useState('');
   const [removing, setRemoving] = useState(false);
   const [toast, setToast] = useState(null);
   const [summertidesDecl, setSummertidesDecl] = useState(null);
@@ -165,27 +169,75 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
           <Avatar profile={profile} size="md" />
         </div>
 
-        {/* Stats strip */}
+        {/* Stats strip — tapping a number makes it editable, but trying to change it summons the guard */}
         <div className="grid grid-cols-2 gap-3">
           <div className="card-brutal p-3 flex flex-col items-center gap-1">
             <div className="flex items-center gap-1">
               <Flame size={16} style={{ color: 'hsl(var(--theme-accent))' }} />
-              <span className="text-2xl font-bold font-display-mono" style={{ color: 'hsl(var(--theme-accent))' }}>
-                {overallStreak}
-              </span>
+              {editingStat === 'streak' ? (
+                <input
+                  autoFocus
+                  type="number"
+                  className="text-2xl font-bold font-display-mono w-16 text-center bg-transparent border-b-2 border-primary outline-none"
+                  style={{ color: 'hsl(var(--theme-accent))' }}
+                  value={editValue}
+                  onChange={e => setEditValue(e.target.value)}
+                  onBlur={() => {
+                    setEditingStat(null);
+                    if (parseInt(editValue, 10) !== overallStreak) setShowGuard(true);
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') { e.target.blur(); }
+                    if (e.key === 'Escape') setEditingStat(null);
+                  }}
+                />
+              ) : (
+                <span
+                  className="text-2xl font-bold font-display-mono cursor-pointer"
+                  style={{ color: 'hsl(var(--theme-accent))' }}
+                  onClick={() => { setEditingStat('streak'); setEditValue(String(overallStreak)); }}
+                >
+                  {overallStreak}
+                </span>
+              )}
             </div>
             <span className="text-xs text-muted-foreground text-center">day streak</span>
           </div>
           <div className="card-brutal p-3 flex flex-col items-center gap-1">
             <div className="flex items-center gap-1">
               <Star size={16} style={{ color: 'hsl(var(--theme-accent))' }} />
-              <span className="text-2xl font-bold font-display-mono" style={{ color: 'hsl(var(--theme-accent))' }}>
-                {vibeScore}
-              </span>
+              {editingStat === 'vibe' ? (
+                <input
+                  autoFocus
+                  type="number"
+                  className="text-2xl font-bold font-display-mono w-16 text-center bg-transparent border-b-2 border-primary outline-none"
+                  style={{ color: 'hsl(var(--theme-accent))' }}
+                  value={editValue}
+                  onChange={e => setEditValue(e.target.value)}
+                  onBlur={() => {
+                    setEditingStat(null);
+                    if (parseInt(editValue, 10) !== vibeScore) setShowGuard(true);
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') { e.target.blur(); }
+                    if (e.key === 'Escape') setEditingStat(null);
+                  }}
+                />
+              ) : (
+                <span
+                  className="text-2xl font-bold font-display-mono cursor-pointer"
+                  style={{ color: 'hsl(var(--theme-accent))' }}
+                  onClick={() => { setEditingStat('vibe'); setEditValue(String(vibeScore)); }}
+                >
+                  {vibeScore}
+                </span>
+              )}
             </div>
             <span className="text-xs text-muted-foreground text-center">vibe score</span>
           </div>
         </div>
+
+        <CheatGuard visible={showGuard} onDone={() => setShowGuard(false)} />
 
         {/* Summertides */}
         {isSummertidesWindow && !summertidesDecl && (
@@ -436,7 +488,6 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
           partnerName={reportSlip.partnerName}
           partnerId={reportSlip.partnerId}
           partnership={reportSlip.partnership}
-          rules={rules}
           onClose={() => setReportSlip(null)}
         />
       )}
