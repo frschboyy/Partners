@@ -37,6 +37,7 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
   const [toast, setToast] = useState(null);
   const [summertidesDecl, setSummertidesDecl] = useState(null);
   const [showSummertides, setShowSummertides] = useState(false);
+  const partnersRef = useRef(null);
 
   const today = new Date();
   const isSummertidesWindow = today.getMonth() === SUMMERTIDES.month &&
@@ -72,6 +73,8 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
         (navIntent.fromUserId && (p.user_a_id === navIntent.fromUserId || p.user_b_id === navIntent.fromUserId))
       );
       if (p) setShowAgreement(p);
+    } else if (navIntent.action === 'viewPartners') {
+      setTimeout(() => partnersRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
     }
     onClearNavIntent?.();
   }, [navIntent, loading, partnerships]);
@@ -334,7 +337,7 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
         </div>
 
         {/* Partners section */}
-        <div className="space-y-3">
+        <div ref={partnersRef} className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="font-bold text-lg">Partners</h2>
             <motion.button

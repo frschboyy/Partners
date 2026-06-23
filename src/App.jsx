@@ -211,9 +211,9 @@ function MainApp({ user }) {
           <NotificationsPanel
             currentUser={user}
             profile={profile}
-            onClose={() => { handleTabChange(prevTab); checkNotifications(); }}
+            onClose={() => handleTabChange(prevTab)}
             onNavigateToSettings={(section) => { handleTabChange('settings'); setSettingsSection(section || null); }}
-            onNavigate={(tab, intent) => { handleTabChange(tab); if (intent) setNavIntent(intent); checkNotifications(); }}
+            onNavigate={(tab, intent) => { handleTabChange(tab); if (intent) setNavIntent(intent); }}
           />
         )}
       </AnimatePresence>
@@ -265,7 +265,7 @@ function MainApp({ user }) {
 
       <BottomNav
         activeTab={activeTab}
-        onTabChange={tab => { handleTabChange(tab); if (tab === 'notifications') checkNotifications(); }}
+        onTabChange={tab => handleTabChange(tab)}
         unreadMessages={unreadMessages}
         unreadNotifications={unreadNotifications}
         feedHasNew={newFeedPosts}

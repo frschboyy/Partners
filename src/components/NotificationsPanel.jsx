@@ -30,10 +30,24 @@ function getAction(n) {
   }
 }
 
+const ACTIONED_KEY = 'accountable_actioned_notifs';
+
+function getActionedIds() {
+  try { return new Set(JSON.parse(localStorage.getItem(ACTIONED_KEY) || '[]')); }
+  catch { return new Set(); }
+}
+
+function markActioned(id) {
+  const ids = getActionedIds();
+  ids.add(id);
+  localStorage.setItem(ACTIONED_KEY, JSON.stringify([...ids]));
+}
+
 export default function NotificationsPanel({ currentUser, profile, onClose, onNavigateToSettings, onNavigate }) {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [pendingSlips, setPendingSlips] = useState([]);
+  const [actionedIds, setActionedIds] = useState(() => getActionedIds());
   const { message: toastMessage, show: showToast } = useToast();
 
   const needsSetPassword =
@@ -213,8 +227,12 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
                   <p className="text-xs text-muted-foreground mt-0.5">{n.body}</p>
                   <p className="text-[10px] text-muted-foreground mt-1">{formatDateTime(n.created_at)}</p>
                   {action && (
-                    <p className="text-xs font-bold mt-1.5" style={{ color: 'hsl(var(--theme-accent))' }}>
-                      {action.label} →
+                    <p className="text-xs font-bold mt-1.5" style={{
+                      color: actionedIds.has(n.id)
+                        ? 'hsl(var(--muted-foreground))'
+                        : 'hsl(var(--theme-accent))'
+                    }}>
+                      {actionedIds.has(n.id) ? 'Viewed' : `${action.label} →`}
                     </p>
                   )}
                 </div>
@@ -224,13 +242,17 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
 
             const cls = `flex gap-3 p-3 rounded-xl border w-full text-left ${n.read ? 'border-border bg-card' : 'border-primary bg-accent-muted'}`;
 
-            if (action && onNavigate) {
+            if (action && onNavigate && !actionedIds.has(n.id)) {
               return (
                 <motion.button
                   key={n.id}
                   whileTap={{ scale: 0.97 }}
                   className={cls}
-                  onClick={() => onNavigate(action.tab, action.intent)}
+                  onClick={() => {
+                    markActioned(n.id);
+                    setActionedIds(getActionedIds());
+                    onNavigate(action.tab, action.intent);
+                  }}
                 >
                   {inner}
                 </motion.button>
