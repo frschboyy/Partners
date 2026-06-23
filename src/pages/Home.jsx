@@ -324,6 +324,7 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
             {/* Negotiating partnerships */}
             {negotiatingPartners.map(p => {
               const partnerName = p.user_a_id === currentUser.id ? p.user_b_name : p.user_a_name;
+              const iProposed = p.last_proposer_id === currentUser.id;
               return (
                 <div key={p.id} className="card-brutal p-3 flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full bg-accent-muted flex items-center justify-center text-xl">
@@ -335,11 +336,15 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
                   </div>
                   <div className="flex gap-1">
                     <button
-                      onClick={() => setShowAgreement(p)}
+                      onClick={iProposed ? undefined : () => setShowAgreement(p)}
+                      disabled={iProposed}
                       className="px-3 py-1.5 rounded-lg text-xs font-bold"
-                      style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
+                      style={iProposed
+                        ? { background: 'hsl(var(--muted))', color: 'hsl(var(--muted-foreground))', cursor: 'not-allowed', opacity: 0.6 }
+                        : { background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }
+                      }
                     >
-                      Open Agreement
+                      {iProposed ? 'Proposal Pending' : 'Open Agreement'}
                     </button>
                     <motion.button
                       whileTap={{ scale: 0.85 }}
@@ -577,6 +582,7 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
           currentUserRules={rules}
           onClose={() => { setShowAgreement(null); loadAll(); }}
           onAgreed={() => { setShowAgreement(null); loadAll(); }}
+          onProposalSent={() => { showHomeToast('Proposal Sent'); }}
         />
       )}
 

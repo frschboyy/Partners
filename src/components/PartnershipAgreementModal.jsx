@@ -3,7 +3,7 @@ import { X, Plus, Trash2, CheckCircle, Send, Lock, RefreshCw } from 'lucide-reac
 import { api, supabase } from '@/api/supabaseClient';
 import { motion, AnimatePresence } from 'framer-motion';
 
-export default function PartnershipAgreementModal({ partnership, currentUserId, currentUserRules = [], onClose, onAgreed }) {
+export default function PartnershipAgreementModal({ partnership, currentUserId, currentUserRules = [], onClose, onAgreed, onProposalSent }) {
   const [goals, setGoals] = useState(partnership.shared_goals || []);
   const [newGoal, setNewGoal] = useState('');
   const [penalty, setPenalty] = useState(partnership.penalty_amount || 100);
@@ -137,6 +137,7 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
       read: false,
     });
     setSaving(false);
+    onProposalSent?.();
     onClose();
   }
 
