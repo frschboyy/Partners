@@ -14,6 +14,8 @@ export default function LocketFeed({
   commentCounts = {},
   onOpenChat,
   onRefresh,
+  onLogPost,
+  isNewUser = false,
   emptyMessage = 'Nothing here yet',
   emptyEmoji = '📭',
 }) {
@@ -62,10 +64,36 @@ export default function LocketFeed({
 
   if (posts.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-4">
-        <span className="text-6xl">{emptyEmoji}</span>
-        <p className="text-lg font-bold text-center">{emptyMessage}</p>
-        <p className="text-sm text-muted-foreground text-center px-8">Posts from you and your partners will appear here.</p>
+      <div className="flex flex-col items-center justify-center h-full gap-5 px-8">
+        <motion.span
+          className="text-6xl"
+          animate={{ scale: [1, 1.08, 1] }}
+          transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+        >
+          {isNewUser ? '👋' : emptyEmoji}
+        </motion.span>
+        <div className="text-center space-y-1.5">
+          <p className="text-lg font-bold">
+            {isNewUser ? 'Welcome! You\'re all set up.' : emptyMessage}
+          </p>
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            {isNewUser
+              ? 'Log your first moment so your partners can see what you\'re working on.'
+              : 'Be the first one to post — your partners are watching.'}
+          </p>
+        </div>
+        {onLogPost && (
+          <motion.button
+            onClick={onLogPost}
+            whileTap={{ scale: 0.94 }}
+            animate={{ boxShadow: ['0 0 0 0px hsl(var(--theme-accent)/0.4)', '0 0 0 8px hsl(var(--theme-accent)/0)', '0 0 0 0px hsl(var(--theme-accent)/0.4)'] }}
+            transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+            className="flex items-center gap-2 px-5 py-3 rounded-xl font-bold text-sm"
+            style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
+          >
+            {isNewUser ? 'Log your first post →' : 'Log something now →'}
+          </motion.button>
+        )}
       </div>
     );
   }

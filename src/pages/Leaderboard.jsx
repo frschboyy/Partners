@@ -4,7 +4,7 @@ import { Trophy, Flame, Camera, Dumbbell, Crown, AlertCircle, Users } from 'luci
 import Avatar from '@/components/Avatar';
 import { motion } from 'framer-motion';
 
-export default function Leaderboard({ currentUser, profile }) {
+export default function Leaderboard({ currentUser, profile, onTabChange }) {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('streak');
@@ -199,10 +199,30 @@ export default function Leaderboard({ currentUser, profile }) {
             ))}
           </div>
         ) : sorted.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 gap-3">
-            <p className="text-5xl">🏆</p>
-            <p className="font-bold text-center">No rankings yet</p>
-            <p className="text-sm text-muted-foreground text-center">Form partnerships and start logging to appear here.</p>
+          <div className="flex flex-col items-center justify-center py-16 gap-4 text-center px-6">
+            <motion.span
+              className="text-5xl"
+              animate={{ scale: [1, 1.08, 1] }}
+              transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+            >
+              🏆
+            </motion.span>
+            <div className="space-y-1">
+              <p className="font-bold">No rankings yet</p>
+              <p className="text-sm text-muted-foreground">Rankings appear once you form a partnership and start logging streaks together.</p>
+            </div>
+            {onTabChange && (
+              <motion.button
+                whileTap={{ scale: 0.94 }}
+                onClick={() => onTabChange('home')}
+                animate={{ boxShadow: ['0 0 0 0px hsl(var(--theme-accent)/0.4)', '0 0 0 7px hsl(var(--theme-accent)/0)', '0 0 0 0px hsl(var(--theme-accent)/0.4)'] }}
+                transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm"
+                style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
+              >
+                Find a partner on Home →
+              </motion.button>
+            )}
           </div>
         ) : (
           sorted.map((entry, idx) => {

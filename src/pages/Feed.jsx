@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api, supabase } from '@/api/supabaseClient';
 import LocketFeed from '@/components/LocketFeed';
+import LogPostModal from '@/components/LogPostModal';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useToast, Toast } from '@/components/Toast';
 
@@ -69,6 +70,7 @@ export default function Feed({ currentUser, profile }) {
   const [chatTarget, setChatTarget] = useState(null);
   const [chatPartnership, setChatPartnership] = useState(null);
   const [partnerships, setPartnerships] = useState([]);
+  const [showLogPost, setShowLogPost] = useState(false);
 
   useEffect(() => {
     if (currentUser) loadFeed();
@@ -188,6 +190,8 @@ export default function Feed({ currentUser, profile }) {
                 setChatTarget({ post, partnership });
               }}
               onRefresh={loadFeed}
+              onLogPost={() => setShowLogPost(true)}
+              isNewUser={profile?.created_at ? (Date.now() - new Date(profile.created_at).getTime()) < 48 * 60 * 60 * 1000 : false}
               emptyMessage="Your feed is empty"
               emptyEmoji="🌱"
             />
@@ -203,6 +207,15 @@ export default function Feed({ currentUser, profile }) {
           partnership={chatTarget.partnership}
           post={chatTarget.post}
           onClose={() => setChatTarget(null)}
+        />
+      )}
+
+      {showLogPost && (
+        <LogPostModal
+          currentUser={currentUser}
+          profile={profile}
+          onClose={() => setShowLogPost(false)}
+          onPosted={() => { setShowLogPost(false); loadFeed(); }}
         />
       )}
     </div>

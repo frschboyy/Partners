@@ -16,7 +16,7 @@ function formatTime(dateStr) {
   return new Date(dateStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-export default function Chat({ currentUser, profile }) {
+export default function Chat({ currentUser, profile, onTabChange }) {
   const [partnerships, setPartnerships] = useState([]);
   const [partnerProfiles, setPartnerProfiles] = useState({});
   const [selectedPartnership, setSelectedPartnership] = useState(null);
@@ -589,10 +589,30 @@ export default function Chat({ currentUser, profile }) {
 
       <div className="flex-1 overflow-y-auto px-4 space-y-2">
         {sortedPartnerships.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-48 gap-3">
-            <p className="text-4xl">💬</p>
-            <p className="font-semibold text-center">No conversations yet</p>
-            <p className="text-sm text-muted-foreground text-center">Form a partnership on your Home screen to start chatting.</p>
+          <div className="flex flex-col items-center justify-center h-64 gap-4 text-center px-6">
+            <motion.span
+              className="text-5xl"
+              animate={{ scale: [1, 1.08, 1] }}
+              transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+            >
+              💬
+            </motion.span>
+            <div className="space-y-1">
+              <p className="font-semibold">No conversations yet</p>
+              <p className="text-sm text-muted-foreground">Form a partnership first — then you'll be able to message your accountability partner here.</p>
+            </div>
+            {onTabChange && (
+              <motion.button
+                whileTap={{ scale: 0.94 }}
+                onClick={() => onTabChange('home')}
+                animate={{ boxShadow: ['0 0 0 0px hsl(var(--theme-accent)/0.4)', '0 0 0 7px hsl(var(--theme-accent)/0)', '0 0 0 0px hsl(var(--theme-accent)/0.4)'] }}
+                transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm"
+                style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
+              >
+                Find a partner on Home →
+              </motion.button>
+            )}
           </div>
         ) : (
           sortedPartnerships.map(p => {

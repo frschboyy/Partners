@@ -183,7 +183,7 @@ function MainApp({ user }) {
       const prevIdx = TAB_ORDER.indexOf(activeTab);
       const nextIdx = TAB_ORDER.indexOf(tab);
       setSlideDir(nextIdx >= prevIdx ? 1 : -1);
-      setPrevTab(activeTab);
+      if (activeTab !== 'notifications') setPrevTab(activeTab);
       localStorage.setItem('accountable_last_tab', tab);
     }
     setActiveTab(tab);
@@ -232,12 +232,12 @@ function MainApp({ user }) {
         )}
         {activeTab === 'chat' && (
           <div className="h-full overflow-y-auto">
-            <Chat currentUser={user} profile={profile} />
+            <Chat currentUser={user} profile={profile} onTabChange={handleTabChange} />
           </div>
         )}
         {activeTab === 'leaderboard' && (
           <div className="h-full overflow-y-auto">
-            <Leaderboard currentUser={user} profile={profile} />
+            <Leaderboard currentUser={user} profile={profile} onTabChange={handleTabChange} />
           </div>
         )}
         {activeTab === 'settings' && (

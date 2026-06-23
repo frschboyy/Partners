@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { X, ChevronLeft, ChevronRight, Pencil, Trash2, Smile, Plus } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Pencil, Trash2, Smile, Plus, ArrowUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '@/api/supabaseClient';
 import { compressImage } from '@/lib/imageUtils';
@@ -8,7 +8,7 @@ import CommentsSheet from '@/components/CommentsSheet';
 import { EMOJI_REACTIONS, POST_TYPE_EMOJI } from '@/lib/constants';
 import { usePostReactions } from '@/lib/usePostReactions';
 
-export default function MyPostsOverlay({ posts, profile, currentUserId, profiles = {}, onClose, onRefresh }) {
+export default function MyPostsOverlay({ posts, profile, currentUserId, profiles = {}, onClose, onRefresh, onCreatePost }) {
   const [focusedPost, setFocusedPost] = useState(null);
   const [imageIndex, setImageIndex] = useState(0);
 
@@ -199,7 +199,7 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
             </div>
             <div />
             <div className="flex justify-end gap-1.5">
-              {focusedPost && (
+              {focusedPost ? (
                 <>
                   <motion.button whileTap={{ scale: 0.85 }} onClick={() => setShowReactions(s => !s)} className="p-2 rounded-full bg-secondary">
                     <Smile size={16} />
@@ -218,6 +218,16 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
                     <Trash2 size={16} className="text-destructive" />
                   </motion.button>
                 </>
+              ) : onCreatePost && (
+                <motion.button
+                  whileTap={{ scale: 0.85 }}
+                  onClick={onCreatePost}
+                  className="p-2 rounded-full"
+                  style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
+                  title="Create new post"
+                >
+                  <Plus size={16} />
+                </motion.button>
               )}
             </div>
           </div>
@@ -472,10 +482,34 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
               exit={{ opacity: 0 }}
             >
               {posts.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-48 gap-3 text-muted-foreground">
-                  <p className="text-4xl">📝</p>
-                  <p className="font-semibold">No posts yet</p>
-                  <p className="text-sm text-center">Log something to see your posts here.</p>
+                <div className="flex flex-col items-center justify-center h-64 gap-4 text-center px-6">
+                  {/* Arrow pointing to the "+" button in the top-right header */}
+                  <div className="flex flex-col items-end self-stretch pr-1 -mt-8 -mb-2">
+                    <motion.div
+                      animate={{ y: [0, -6, 0] }}
+                      transition={{ duration: 1, repeat: Infinity, ease: 'easeInOut' }}
+                      className="text-muted-foreground"
+                    >
+                      <ArrowUp size={22} strokeWidth={2.5} style={{ color: 'hsl(var(--theme-accent))' }} />
+                    </motion.div>
+                  </div>
+                  <p className="text-3xl">📝</p>
+                  <div className="space-y-1">
+                    <p className="font-semibold text-foreground">Make your first post</p>
+                    <p className="text-sm text-muted-foreground">Tap the + button above to share a workout, check-in, or slip.</p>
+                  </div>
+                  {onCreatePost && (
+                    <motion.button
+                      whileTap={{ scale: 0.94 }}
+                      onClick={onCreatePost}
+                      animate={{ boxShadow: ['0 0 0 0px hsl(var(--theme-accent)/0.35)', '0 0 0 7px hsl(var(--theme-accent)/0)', '0 0 0 0px hsl(var(--theme-accent)/0.35)'] }}
+                      transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+                      className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm"
+                      style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
+                    >
+                      <Plus size={15} /> Create your first post
+                    </motion.button>
+                  )}
                 </div>
               ) : (
                 <div className="grid grid-cols-3 gap-1.5">

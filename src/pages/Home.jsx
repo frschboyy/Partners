@@ -291,10 +291,20 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
               ))}
             </div>
           ) : rules.length === 0 ? (
-            <div className="card-brutal p-6 text-center animate-content-reveal">
-              <p className="text-3xl mb-2">📋</p>
+            <div className="card-brutal p-6 text-center animate-content-reveal space-y-3">
+              <p className="text-3xl">📋</p>
               <p className="font-semibold">No rules yet</p>
-              <p className="text-sm text-muted-foreground mt-1">Add your first NO to start your streak.</p>
+              <p className="text-sm text-muted-foreground">Define what you're committing to — your partners will hold you to it.</p>
+              <motion.button
+                whileTap={{ scale: 0.94 }}
+                onClick={() => setShowAddRule(true)}
+                animate={{ boxShadow: ['0 0 0 0px hsl(var(--theme-accent)/0.4)', '0 0 0 7px hsl(var(--theme-accent)/0)', '0 0 0 0px hsl(var(--theme-accent)/0.4)'] }}
+                transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold"
+                style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
+              >
+                Add your first rule →
+              </motion.button>
             </div>
           ) : (
             <div className="space-y-2 animate-content-reveal">
@@ -389,10 +399,20 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
 
             {/* Empty state */}
             {!loading && activePartners.length === 0 && negotiatingPartners.length === 0 && (
-              <div className="card-brutal p-6 text-center animate-content-reveal">
-                <p className="text-3xl mb-2">🔭</p>
+              <div className="card-brutal p-6 text-center animate-content-reveal space-y-3">
+                <p className="text-3xl">🔭</p>
                 <p className="font-semibold">No partners yet</p>
-                <p className="text-sm text-muted-foreground mt-1">Tap Discover to find your accountability crew.</p>
+                <p className="text-sm text-muted-foreground">Accountability works better together. Find someone to keep you honest.</p>
+                <motion.button
+                  whileTap={{ scale: 0.94 }}
+                  onClick={() => setShowDiscover(true)}
+                  animate={{ boxShadow: ['0 0 0 0px hsl(var(--theme-accent)/0.4)', '0 0 0 7px hsl(var(--theme-accent)/0)', '0 0 0 0px hsl(var(--theme-accent)/0.4)'] }}
+                  transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold"
+                  style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
+                >
+                  Find a partner →
+                </motion.button>
               </div>
             )}
 
@@ -494,6 +514,7 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
             currentUserId={currentUser.id}
             onClose={() => setShowMyPosts(false)}
             onRefresh={loadMyPosts}
+            onCreatePost={() => { setShowMyPosts(false); setShowLogPost(true); }}
           />
         )}
       </AnimatePresence>
