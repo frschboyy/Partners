@@ -199,7 +199,7 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
             </div>
             <div />
             <div className="flex justify-end gap-1.5">
-              {focusedPost ? (
+              {focusedPost && (
                 <>
                   <motion.button whileTap={{ scale: 0.85 }} onClick={() => setShowReactions(s => !s)} className="p-2 rounded-full bg-secondary">
                     <Smile size={16} />
