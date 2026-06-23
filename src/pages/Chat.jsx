@@ -125,12 +125,14 @@ export default function Chat({ currentUser, profile }) {
           const data = type === 'DELETE' ? payload.old : payload.new;
 
           if (type === 'INSERT' && data.sender_id !== currentUser.id) {
-            // Mark incoming partner messages as read immediately — without this,
-            // messages seen via realtime are never written to read_by in the DB,
-            // so the unread count comes back after leaving the chat.
-            api.entities.ChatMessage.update(data.id, {
-              read_by: [...(data.read_by || []), currentUser.id],
-            }).catch(() => {});
+            // Advance read position so unread count stays at zero while the chat is open
+            supabase
+              .from('partnership_read_positions')
+              .upsert(
+                { partnership_id: pid, user_id: currentUser.id, last_read_at: new Date().toISOString() },
+                { onConflict: 'partnership_id,user_id' }
+              )
+              .catch(() => {});
           }
 
           setMessages(prev => {
@@ -161,34 +163,57 @@ export default function Chat({ currentUser, profile }) {
 
   async function loadPartnerships() {
     try {
-      const [allPartnerships, allProfiles] = await Promise.all([
-        api.entities.Partnership.list(),
-        api.entities.UserProfile.list(),
-      ]);
-
-      const myPartnerships = allPartnerships.filter(
-        p => (p.user_a_id === currentUser.id || p.user_b_id === currentUser.id) &&
-          (p.status === 'active' || p.status === 'negotiating')
-      );
+      const { data: myPartnerships = [] } = await supabase
+        .from('partnerships')
+        .select('*')
+        .or(`user_a_id.eq.${currentUser.id},user_b_id.eq.${currentUser.id}`)
+        .in('status', ['active', 'negotiating']);
       setPartnerships(myPartnerships);
 
+      const partnerIds = myPartnerships.map(p =>
+        p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id
+      );
+      const { data: profileRows = [] } = await supabase
+        .from('user_profiles')
+        .select('*')
+        .in('user_id', partnerIds);
       const profileMap = {};
-      allProfiles.forEach(pr => { profileMap[pr.user_id] = pr; });
+      profileRows.forEach(pr => { profileMap[pr.user_id] = pr; });
       if (profile) profileMap[currentUser.id] = profile;
       setPartnerProfiles(profileMap);
 
-      // Fetch last message + unread count per partnership in parallel
+      if (!myPartnerships.length) return;
+      const partnershipIds = myPartnerships.map(p => p.id);
+
+      // Unread counts via RPC — one round trip for all partnerships
+      const { data: counts = [] } = await supabase.rpc('get_unread_counts', {
+        p_partnership_ids: partnershipIds,
+        p_user_id: currentUser.id,
+      });
       const unread = {};
-      const activity = {};
-      await Promise.all(myPartnerships.map(async p => {
-        const msgs = await api.entities.ChatMessage.filter({ partnership_id: p.id }, '-created_at', 50);
-        unread[p.id] = msgs.filter(m => !m.is_deleted && !m.read_by?.includes(currentUser.id) && m.sender_id !== currentUser.id).length;
-        const latest = msgs.find(m => !m.is_deleted);
-        if (latest) {
-          activity[p.id] = { time: latest.created_at, text: latest.content, senderId: latest.sender_id, msgType: latest.message_type };
-        }
-      }));
+      counts.forEach(row => { unread[row.partnership_id] = Number(row.unread_count); });
       setUnreadCounts(unread);
+
+      // Last non-deleted message per partnership — one query, group client-side
+      const { data: recentMsgs = [] } = await supabase
+        .from('chat_messages')
+        .select('partnership_id, content, created_at, sender_id, message_type')
+        .in('partnership_id', partnershipIds)
+        .eq('is_deleted', false)
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      const activity = {};
+      recentMsgs.forEach(m => {
+        if (!activity[m.partnership_id]) {
+          activity[m.partnership_id] = {
+            time: m.created_at,
+            text: m.content,
+            senderId: m.sender_id,
+            msgType: m.message_type,
+          };
+        }
+      });
       setLastActivity(activity);
     } catch (err) {
       console.error('Failed to load partnerships:', err);
@@ -200,12 +225,13 @@ export default function Chat({ currentUser, profile }) {
     try {
       const msgs = await api.entities.ChatMessage.filter({ partnership_id: partnershipId }, 'created_at', 100);
       setMessages(msgs);
-      const unread = msgs.filter(m => !m.read_by?.includes(currentUser.id) && m.sender_id !== currentUser.id);
-      await Promise.all(
-        unread.map(m =>
-          api.entities.ChatMessage.update(m.id, { read_by: [...(m.read_by || []), currentUser.id] })
-        )
-      );
+      // Single upsert marks this chat as fully read — replaces N individual read_by updates
+      await supabase
+        .from('partnership_read_positions')
+        .upsert(
+          { partnership_id: partnershipId, user_id: currentUser.id, last_read_at: new Date().toISOString() },
+          { onConflict: 'partnership_id,user_id' }
+        );
       setUnreadCounts(prev => ({ ...prev, [partnershipId]: 0 }));
     } catch (err) {
       console.error('Failed to load messages:', err);
@@ -246,7 +272,6 @@ export default function Chat({ currentUser, profile }) {
       sender_name: profile?.display_name || currentUser.full_name,
       content: fullUrl || previewUrl,
       message_type: type,
-      read_by: [currentUser.id],
     });
   }
 
@@ -265,7 +290,6 @@ export default function Chat({ currentUser, profile }) {
         sender_name: profile?.display_name || currentUser.full_name,
         content,
         message_type: 'text',
-        read_by: [currentUser.id],
       });
       // Only add if not already added by the subscription (dedupe by id)
       setMessages(prev => {

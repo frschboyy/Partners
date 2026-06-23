@@ -168,7 +168,6 @@ function ChatDrawer({ currentUser, profile, partnership, post, onClose }) {
       content: text.trim(),
       post_id: post?.id,
       message_type: 'text',
-      read_by: [currentUser.id],
     });
     setMessages(prev => [...prev, msg]);
     setText('');
