@@ -5,7 +5,30 @@ import { PREDEFINED_RULES } from '@/lib/rules';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useToast, Toast } from '@/components/Toast';
 
-const CUSTOM_EMOJIS = ['📌', '🎯', '💡', '⚡', '🔒', '🧠', '🌱', '💼', '🏃', '🍃', '✅', '🛑', '🔥', '💪', '🧘', '🚫'];
+const CUSTOM_EMOJIS = [
+  // Fitness
+  '🏃', '💪', '🏋️', '🚴', '🧘', '🏊', '🤸', '🥊', '🧗', '⚽', '🏀', '🏆', '🥇', '🎯',
+  // Health & diet
+  '🥗', '🍎', '🥦', '🍃', '🫐', '🍵', '💧', '🥤', '🫀',
+  // Mind & study
+  '🧠', '📖', '✍️', '📚', '💡', '🔬', '🎓', '🧩',
+  // Sleep & rest
+  '😴', '🌙', '⏰', '🛌',
+  // Work & productivity
+  '💼', '📊', '💻', '📋', '✅', '📌', '⏱️', '🗂️',
+  // Finance
+  '💰', '💵', '📈', '🏦', '💳',
+  // Digital & social
+  '📱', '🎮', '📺', '💬', '🤳',
+  // Vices to quit
+  '🍺', '🍷', '🚬', '🍫', '🍟', '🎰',
+  // Warning symbols
+  '🚫', '🔒', '⚠️', '🛑', '❌', '🚷',
+  // Motivation & nature
+  '🌱', '🌿', '🌸', '☀️', '⭐', '🌟', '🔥', '⚡', '🎊', '🎖️',
+  // Misc
+  '❤️', '🙏', '✨', '🔑', '🛡️', '🤝',
+];
 
 export default function AddRuleModal({ userId, existingRuleTitles = [], onAdded, onClose }) {
   const { message: toastMessage, show: showToast } = useToast();
@@ -173,7 +196,7 @@ export default function AddRuleModal({ userId, existingRuleTitles = [], onAdded,
                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">
                   Pick an emoji
                 </label>
-                <div className="grid grid-cols-8 gap-1.5">
+                <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
                   {CUSTOM_EMOJIS.map(e => (
                     <motion.button
                       key={e}
@@ -183,7 +206,7 @@ export default function AddRuleModal({ userId, existingRuleTitles = [], onAdded,
                         setCustomEmoji(e);
                         setSelectedRule(r => r ? { ...r, emoji: e } : r);
                       }}
-                      className={`aspect-square text-xl rounded-lg flex items-center justify-center border-2 transition-all ${
+                      className={`flex-shrink-0 w-10 h-10 text-xl rounded-lg flex items-center justify-center border-2 transition-all ${
                         customEmoji === e ? 'border-primary bg-accent-muted' : 'border-transparent bg-secondary'
                       }`}
                     >
