@@ -22,11 +22,8 @@ export default function Feed({ currentUser, profile }) {
   async function loadFeed() {
     setLoading(true);
     try {
-      const [allPartnerships, allProfiles] = await Promise.all([
-        api.entities.Partnership.list(),
-        api.entities.UserProfile.list(),
-      ]);
-
+      // Partnerships first so we can scope all subsequent queries to relevant users only
+      const allPartnerships = await api.entities.Partnership.list();
       const myPartnerships = allPartnerships.filter(
         p => (p.user_a_id === currentUser.id || p.user_b_id === currentUser.id) && p.status === 'active'
       );
@@ -37,24 +34,23 @@ export default function Feed({ currentUser, profile }) {
       );
       const allowedUserIds = [currentUser.id, ...partnerIds];
 
-      const profileMap = {};
-      allProfiles.forEach(pr => { profileMap[pr.user_id] = pr; });
-      if (profile) profileMap[currentUser.id] = profile;
-      setProfiles(profileMap);
-
       // Feed: last 7 days, with a 20-post floor so sparse partnerships aren't empty
       const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-      const { data: recentPosts, error: recentErr } = await supabase
-        .from('posts')
-        .select('*')
-        .in('user_id', allowedUserIds)
-        .gte('created_at', oneWeekAgo)
-        .order('created_at', { ascending: false })
-        .limit(100);
-      if (recentErr) throw recentErr;
+      // Scoped profile fetch and recent posts run in parallel
+      const [profileResult, recentPostsResult] = await Promise.all([
+        supabase.from('user_profiles').select('*').in('user_id', allowedUserIds),
+        supabase.from('posts').select('*').in('user_id', allowedUserIds)
+          .gte('created_at', oneWeekAgo).order('created_at', { ascending: false }).limit(100),
+      ]);
 
-      let feedPosts = recentPosts || [];
+      const profileMap = {};
+      profileResult.data?.forEach(pr => { profileMap[pr.user_id] = pr; });
+      if (profile) profileMap[currentUser.id] = profile;
+      setProfiles(profileMap);
+
+      if (recentPostsResult.error) throw recentPostsResult.error;
+      let feedPosts = recentPostsResult.data || [];
 
       if (feedPosts.length < 20) {
         const { data: olderPosts } = await supabase
@@ -67,38 +63,30 @@ export default function Feed({ currentUser, profile }) {
         feedPosts = [...feedPosts, ...(olderPosts || [])];
       }
 
-      // Grid view needs all posts per user (not just the feed window)
-      const { data: allUserPosts } = await supabase
-        .from('posts')
-        .select('*')
-        .in('user_id', allowedUserIds)
-        .order('created_at', { ascending: false })
-        .limit(200);
+      setPosts(feedPosts);
+
+      const postIds = feedPosts.map(p => p.id);
+
+      // Grid view data and comment counts are independent — fetch in parallel
+      const [allUserPostsResult, commentResult] = await Promise.all([
+        supabase.from('posts').select('*').in('user_id', allowedUserIds)
+          .order('created_at', { ascending: false }).limit(200),
+        postIds.length > 0
+          ? supabase.from('chat_messages').select('post_id').in('post_id', postIds).is('reply_to_id', null)
+          : Promise.resolve({ data: [] }),
+      ]);
 
       const byUser = {};
-      (allUserPosts || []).forEach(p => {
+      (allUserPostsResult.data || []).forEach(p => {
         if (!byUser[p.user_id]) byUser[p.user_id] = [];
         byUser[p.user_id].push(p);
       });
       setAllPostsByUser(byUser);
 
-      setPosts(feedPosts);
-
-      // Fetch top-level comment counts for all feed posts in one query
-      const postIds = feedPosts.map(p => p.id);
       const counts = {};
-      if (postIds.length > 0) {
-        const { data: commentRows } = await supabase
-          .from('chat_messages')
-          .select('post_id')
-          .in('post_id', postIds)
-          .is('reply_to_id', null);
-        if (commentRows) {
-          commentRows.forEach(r => {
-            counts[r.post_id] = (counts[r.post_id] || 0) + 1;
-          });
-        }
-      }
+      (commentResult.data || []).forEach(r => {
+        counts[r.post_id] = (counts[r.post_id] || 0) + 1;
+      });
       setCommentCounts(counts);
     } catch (err) {
       console.error('Failed to load feed:', err?.message || err);
