@@ -16,8 +16,9 @@ function formatTime(dateStr) {
   return new Date(dateStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-export default function Chat({ currentUser, profile, onTabChange }) {
+export default function Chat({ currentUser, profile, onTabChange, navIntent, onClearNavIntent }) {
   const [partnerships, setPartnerships] = useState([]);
+  const [loadingPartnerships, setLoadingPartnerships] = useState(true);
   const [partnerProfiles, setPartnerProfiles] = useState({});
   const [selectedPartnership, setSelectedPartnership] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -43,6 +44,15 @@ export default function Chat({ currentUser, profile, onTabChange }) {
   // Keep a mutable ref in sync so the global ChatMessage subscription (which only
   // mounts once on [currentUser]) can read the current chat without being re-subscribed.
   useEffect(() => { selectedPartnershipRef.current = selectedPartnership; }, [selectedPartnership]);
+
+  useEffect(() => {
+    if (!navIntent || navIntent.action !== 'openChat' || loadingPartnerships) return;
+    const p = partnerships.find(p =>
+      p.user_a_id === navIntent.fromUserId || p.user_b_id === navIntent.fromUserId
+    );
+    if (p) setSelectedPartnership(p);
+    onClearNavIntent?.();
+  }, [navIntent, loadingPartnerships, partnerships]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -165,6 +175,7 @@ export default function Chat({ currentUser, profile, onTabChange }) {
   }, [messages]);
 
   async function loadPartnerships() {
+    setLoadingPartnerships(true);
     try {
       const { data: myPartnerships = [] } = await supabase
         .from('partnerships')
@@ -220,6 +231,8 @@ export default function Chat({ currentUser, profile, onTabChange }) {
       setLastActivity(activity);
     } catch (err) {
       console.error('Failed to load partnerships:', err);
+    } finally {
+      setLoadingPartnerships(false);
     }
   }
 
@@ -588,7 +601,20 @@ export default function Chat({ currentUser, profile, onTabChange }) {
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 space-y-2">
-        {sortedPartnerships.length === 0 ? (
+        {loadingPartnerships ? (
+          <div className="space-y-3 pt-2">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="flex items-center gap-3 p-3 rounded-xl border border-border animate-pulse">
+                <div className="w-11 h-11 rounded-full bg-muted flex-shrink-0" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-3 bg-muted rounded w-32" />
+                  <div className="h-2.5 bg-muted rounded w-48" />
+                </div>
+                <div className="h-2.5 bg-muted rounded w-8" />
+              </div>
+            ))}
+          </div>
+        ) : sortedPartnerships.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 gap-4 text-center px-6">
             <motion.span
               className="text-5xl"

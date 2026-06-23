@@ -73,14 +73,8 @@ export default function LocketFeed({
           {isNewUser ? '👋' : emptyEmoji}
         </motion.span>
         <div className="text-center space-y-1.5">
-          <p className="text-lg font-bold">
-            {isNewUser ? 'Welcome! You\'re all set up.' : emptyMessage}
-          </p>
-          <p className="text-sm text-muted-foreground leading-relaxed">
-            {isNewUser
-              ? 'Log your first moment so your partners can see what you\'re working on.'
-              : 'Be the first one to post — your partners are watching.'}
-          </p>
+          <p className="text-lg font-bold">Feed is Empty</p>
+          <p className="text-sm text-muted-foreground leading-relaxed">Be the first one to post!</p>
         </div>
         {onLogPost && (
           <motion.button
@@ -91,7 +85,7 @@ export default function LocketFeed({
             className="flex items-center gap-2 px-5 py-3 rounded-xl font-bold text-sm"
             style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
           >
-            {isNewUser ? 'Log your first post →' : 'Log something now →'}
+            Log something now →
           </motion.button>
         )}
       </div>

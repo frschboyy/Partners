@@ -5,7 +5,32 @@ import { motion } from 'framer-motion';
 import { X, Bell } from 'lucide-react';
 import { useToast, Toast } from '@/components/Toast';
 
-export default function NotificationsPanel({ currentUser, profile, onClose, onNavigateToSettings }) {
+function getAction(n) {
+  switch (n.type) {
+    case 'partner_request':
+      return { label: 'View request', tab: 'home', intent: { action: 'openDiscover' } };
+    case 'request_accepted':
+      return { label: 'View partner', tab: 'home', intent: { action: 'viewPartners' } };
+    case 'partnership_agreed':
+      if (n.action_type === 'partnership_proposal') {
+        return { label: 'View proposal', tab: 'home', intent: { action: 'openAgreement', partnershipId: n.action_id, fromUserId: n.from_user_id } };
+      }
+      return { label: 'View partnership', tab: 'home', intent: { action: 'viewPartners' } };
+    case 'partnership_proposal':
+      return { label: 'View new terms', tab: 'home', intent: { action: 'openAgreement', fromUserId: n.from_user_id } };
+    case 'slip_confirmed':
+    case 'slip_disputed':
+      return { label: 'View financials', tab: 'home', intent: { action: 'viewPartners' } };
+    case 'new_message':
+      return { label: 'Open chat', tab: 'chat', intent: { action: 'openChat', fromUserId: n.from_user_id } };
+    case 'summertides_declared':
+      return { label: 'View feed', tab: 'feed', intent: null };
+    default:
+      return null;
+  }
+}
+
+export default function NotificationsPanel({ currentUser, profile, onClose, onNavigateToSettings, onNavigate }) {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [pendingSlips, setPendingSlips] = useState([]);
@@ -178,19 +203,41 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
             <p className="text-sm text-muted-foreground">Nothing new right now.</p>
           </div>
         ) : (
-          notifications.map(n => (
-            <div key={n.id} className={`flex gap-3 p-3 rounded-xl border ${n.read ? 'border-border bg-card' : 'border-primary bg-accent-muted'}`}>
-              <span className="text-xl flex-shrink-0">{typeIcons[n.type] || '🔔'}</span>
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold text-sm">{n.title}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">{n.body}</p>
-                <p className="text-[10px] text-muted-foreground mt-1">
-                  {formatDateTime(n.created_at)}
-                </p>
-              </div>
-              {!n.read && <div className="w-2 h-2 rounded-full bg-primary mt-1 flex-shrink-0" />}
-            </div>
-          ))
+          notifications.map(n => {
+            const action = getAction(n);
+            const inner = (
+              <>
+                <span className="text-xl flex-shrink-0 mt-0.5">{typeIcons[n.type] || '🔔'}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-sm">{n.title}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{n.body}</p>
+                  <p className="text-[10px] text-muted-foreground mt-1">{formatDateTime(n.created_at)}</p>
+                  {action && (
+                    <p className="text-xs font-bold mt-1.5" style={{ color: 'hsl(var(--theme-accent))' }}>
+                      {action.label} →
+                    </p>
+                  )}
+                </div>
+                {!n.read && <div className="w-2 h-2 rounded-full bg-primary mt-1 flex-shrink-0" />}
+              </>
+            );
+
+            const cls = `flex gap-3 p-3 rounded-xl border w-full text-left ${n.read ? 'border-border bg-card' : 'border-primary bg-accent-muted'}`;
+
+            if (action && onNavigate) {
+              return (
+                <motion.button
+                  key={n.id}
+                  whileTap={{ scale: 0.97 }}
+                  className={cls}
+                  onClick={() => onNavigate(action.tab, action.intent)}
+                >
+                  {inner}
+                </motion.button>
+              );
+            }
+            return <div key={n.id} className={cls}>{inner}</div>;
+          })
         )}
       </div>
     </motion.div>

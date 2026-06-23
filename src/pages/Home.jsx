@@ -16,7 +16,7 @@ import SelfSlipSection from '@/components/SelfSlipSection';
 import CheatGuard from '@/components/CheatGuard';
 import { SUMMERTIDES } from '@/lib/constants';
 
-export default function Home({ currentUser, profile, onProfileUpdate }) {
+export default function Home({ currentUser, profile, onProfileUpdate, navIntent, onClearNavIntent }) {
   const { message: homeToastMsg, show: showHomeToast } = useToast();
   const [rules, setRules] = useState([]);
   const [partnerships, setPartnerships] = useState([]);
@@ -61,6 +61,20 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
     const t = setTimeout(() => setToast(null), 3000);
     return () => clearTimeout(t);
   }, [toast]);
+
+  useEffect(() => {
+    if (!navIntent || loading) return;
+    if (navIntent.action === 'openDiscover') {
+      setShowDiscover(true);
+    } else if (navIntent.action === 'openAgreement') {
+      const p = partnerships.find(p =>
+        (navIntent.partnershipId && p.id === navIntent.partnershipId) ||
+        (navIntent.fromUserId && (p.user_a_id === navIntent.fromUserId || p.user_b_id === navIntent.fromUserId))
+      );
+      if (p) setShowAgreement(p);
+    }
+    onClearNavIntent?.();
+  }, [navIntent, loading, partnerships]);
 
   async function loadAll() {
     setLoading(true);

@@ -78,6 +78,7 @@ function MainApp({ user }) {
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [newFeedPosts, setNewFeedPosts] = useState(false);
   const [settingsSection, setSettingsSection] = useState(null);
+  const [navIntent, setNavIntent] = useState(null);
 
   useEffect(() => {
     applyTheme(currentTheme, darkMode);
@@ -179,6 +180,7 @@ function MainApp({ user }) {
 
   function handleTabChange(tab) {
     if (tab === 'feed') setNewFeedPosts(false);
+    if (tab === 'notifications') setUnreadNotifications(0);
     if (tab !== 'notifications') {
       const prevIdx = TAB_ORDER.indexOf(activeTab);
       const nextIdx = TAB_ORDER.indexOf(tab);
@@ -211,6 +213,7 @@ function MainApp({ user }) {
             profile={profile}
             onClose={() => { handleTabChange(prevTab); checkNotifications(); }}
             onNavigateToSettings={(section) => { handleTabChange('settings'); setSettingsSection(section || null); }}
+            onNavigate={(tab, intent) => { handleTabChange(tab); if (intent) setNavIntent(intent); checkNotifications(); }}
           />
         )}
       </AnimatePresence>
@@ -222,6 +225,8 @@ function MainApp({ user }) {
               currentUser={user}
               profile={profile}
               onProfileUpdate={setProfile}
+              navIntent={navIntent}
+              onClearNavIntent={() => setNavIntent(null)}
             />
           </div>
         )}
@@ -232,7 +237,7 @@ function MainApp({ user }) {
         )}
         {activeTab === 'chat' && (
           <div className="h-full overflow-y-auto">
-            <Chat currentUser={user} profile={profile} onTabChange={handleTabChange} />
+            <Chat currentUser={user} profile={profile} onTabChange={handleTabChange} navIntent={navIntent} onClearNavIntent={() => setNavIntent(null)} />
           </div>
         )}
         {activeTab === 'leaderboard' && (

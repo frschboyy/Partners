@@ -218,16 +218,6 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
                     <Trash2 size={16} className="text-destructive" />
                   </motion.button>
                 </>
-              ) : onCreatePost && (
-                <motion.button
-                  whileTap={{ scale: 0.85 }}
-                  onClick={onCreatePost}
-                  className="p-2 rounded-full"
-                  style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
-                  title="Create new post"
-                >
-                  <Plus size={16} />
-                </motion.button>
               )}
             </div>
           </div>
@@ -483,20 +473,10 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
             >
               {posts.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-64 gap-4 text-center px-6">
-                  {/* Arrow pointing to the "+" button in the top-right header */}
-                  <div className="flex flex-col items-end self-stretch pr-1 -mt-8 -mb-2">
-                    <motion.div
-                      animate={{ y: [0, -6, 0] }}
-                      transition={{ duration: 1, repeat: Infinity, ease: 'easeInOut' }}
-                      className="text-muted-foreground"
-                    >
-                      <ArrowUp size={22} strokeWidth={2.5} style={{ color: 'hsl(var(--theme-accent))' }} />
-                    </motion.div>
-                  </div>
                   <p className="text-3xl">📝</p>
                   <div className="space-y-1">
                     <p className="font-semibold text-foreground">Make your first post</p>
-                    <p className="text-sm text-muted-foreground">Tap the + button above to share a workout, check-in, or slip.</p>
+                    <p className="text-sm text-muted-foreground">Share a workout, check-in, or slip with your partners.</p>
                   </div>
                   {onCreatePost && (
                     <motion.button
@@ -510,6 +490,12 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
                       <Plus size={15} /> Create your first post
                     </motion.button>
                   )}
+                  <motion.div
+                    animate={{ y: [0, 6, 0] }}
+                    transition={{ duration: 1, repeat: Infinity, ease: 'easeInOut' }}
+                  >
+                    <ArrowUp size={20} strokeWidth={2.5} style={{ color: 'hsl(var(--theme-accent))' }} />
+                  </motion.div>
                 </div>
               ) : (
                 <div className="grid grid-cols-3 gap-1.5">
