@@ -281,19 +281,20 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
       <Toast message={toastMsg} position="top" />
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
 
-      {/* Drag handle — always visible, always closes the overlay */}
+      {/* Drag zone — pill + header together so the whole top strip is draggable */}
       <div
-        className="flex justify-center pt-2.5 pb-1 flex-shrink-0 select-none"
+        className="flex-shrink-0 select-none"
         style={{ touchAction: 'none' }}
         onTouchStart={handleDragStart}
         onTouchMove={handleDragMove}
         onTouchEnd={handleDragEnd}
       >
-        <div className="w-12 h-1 rounded-full bg-muted-foreground/25" />
-      </div>
+        <div className="flex justify-center pt-2.5 pb-1">
+          <div className="w-12 h-1 rounded-full bg-muted-foreground/25" />
+        </div>
 
-      {/* Header */}
-      <div className="grid grid-cols-3 items-center px-4 py-3 border-b border-border flex-shrink-0">
+        {/* Header */}
+        <div className="grid grid-cols-3 items-center px-4 py-3 border-b border-border">
         <div>
           <motion.button
             whileTap={{ scale: 0.85 }}
@@ -328,6 +329,7 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
           )}
         </div>
       </div>
+      </div>{/* end drag zone */}
 
       <AnimatePresence mode="wait">
 
