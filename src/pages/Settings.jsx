@@ -11,7 +11,7 @@ const EMOJIS = ['😎', '💪', '🔥', '🦁', '🐺', '⚡', '🌊', '🎯', '
 
 export default function Settings({ currentUser, profile, onProfileUpdate, currentTheme, darkMode, onThemeChange, onDarkModeChange, scrollToSection, onSectionHandled }) {
   const { checkUserAuth } = useAuth();
-  const { message: toastMessage, show: showToast } = useToast({ duration: 1000 });
+  const { message: toastMessage, show: showToast } = useToast({ duration: 2000 });
   const [editName, setEditName] = useState(profile?.display_name || '');
   const [editEmoji, setEditEmoji] = useState(profile?.emoji_avatar || '😎');
   const [saving, setSaving] = useState(false);
@@ -94,10 +94,15 @@ export default function Settings({ currentUser, profile, onProfileUpdate, curren
   async function handleDeleteAccount() {
     setDeleting(true);
     try {
-      await api.auth.deleteAccount();
-    } catch {
+      const { error } = await supabase.rpc('delete_user');
+      if (error) throw error;
+      await supabase.auth.signOut();
+      showToast('Account deleted');
+      setTimeout(() => { window.location.href = '/login'; }, 1600);
+    } catch (err) {
       setDeleting(false);
       setDeleteStep(0);
+      showToast(err?.message || 'Failed to delete account. Please try again.');
     }
   }
 

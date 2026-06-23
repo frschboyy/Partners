@@ -49,6 +49,34 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
 
   const { message: toastMsg, show: showToast } = useToast();
 
+  // Drag-down-to-close
+  const [dragOffset, setDragOffset] = useState(0);
+  const dragRef = useRef({ startY: null, active: false, offset: 0 });
+
+  function handleDragStart(e) {
+    dragRef.current = { startY: e.touches[0].clientY, active: true, offset: 0 };
+  }
+
+  function handleDragMove(e) {
+    if (!dragRef.current.active) return;
+    const delta = Math.max(0, e.touches[0].clientY - dragRef.current.startY);
+    dragRef.current.offset = delta;
+    setDragOffset(delta);
+  }
+
+  function handleDragEnd() {
+    if (!dragRef.current.active) return;
+    const offset = dragRef.current.offset;
+    dragRef.current.active = false;
+    dragRef.current.startY = null;
+    dragRef.current.offset = 0;
+    if (offset > 110) {
+      onClose();
+    } else {
+      setDragOffset(0);
+    }
+  }
+
   const reactions = localReactions ?? (focusedPost?.reactions || []);
   const myReaction = reactions.find(r => r.user_id === currentUserId);
   const reactionGroups = {};
@@ -152,7 +180,6 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
       const norm = { ...msg };
       setComments(prev => prev.map(c => c.id === optimistic.id ? norm : c));
     } catch (err) {
-      // Rollback optimistic comment and show error
       setComments(prev => prev.filter(c => c.id !== optimistic.id));
       setCommentText(text);
       console.error('Comment save failed:', err?.message || err);
@@ -238,14 +265,34 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
 
   return (
     <motion.div
-      className="fixed inset-0 z-50 bg-background flex flex-col"
+      className="fixed inset-0 z-50"
       initial={{ opacity: 0, y: '100%' }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: '100%' }}
       transition={{ type: 'spring', damping: 25, stiffness: 300 }}
     >
+      <div
+        className="absolute inset-0 bg-background flex flex-col"
+        style={{
+          transform: dragOffset > 0 ? `translateY(${dragOffset}px)` : undefined,
+          transition: !dragRef.current.active ? 'transform 0.35s cubic-bezier(0.32,0.72,0,1)' : 'none',
+        }}
+      >
       <Toast message={toastMsg} position="top" />
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
+
+      {/* Drag handle — only in grid view */}
+      {!focusedPost && (
+        <div
+          className="flex justify-center pt-2.5 pb-1 flex-shrink-0 select-none"
+          style={{ touchAction: 'none' }}
+          onTouchStart={handleDragStart}
+          onTouchMove={handleDragMove}
+          onTouchEnd={handleDragEnd}
+        >
+          <div className="w-12 h-1 rounded-full bg-muted-foreground/25" />
+        </div>
+      )}
 
       {/* Header */}
       <div className="grid grid-cols-3 items-center px-4 py-3 border-b border-border flex-shrink-0">
@@ -259,13 +306,15 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
           </motion.button>
         </div>
         <div className="flex justify-center">
-          <motion.button
-            whileTap={{ scale: 0.85 }}
-            onClick={onClose}
-            className="p-2 rounded-full bg-secondary"
-          >
-            <Home size={16} />
-          </motion.button>
+          {focusedPost && (
+            <motion.button
+              whileTap={{ scale: 0.85 }}
+              onClick={onClose}
+              className="p-2 rounded-full bg-secondary"
+            >
+              <Home size={16} />
+            </motion.button>
+          )}
         </div>
         <div className="flex justify-end gap-1.5">
           {focusedPost && (
@@ -713,6 +762,7 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
           </motion.div>
         )}
       </AnimatePresence>
+      </div>
     </motion.div>
   );
 }

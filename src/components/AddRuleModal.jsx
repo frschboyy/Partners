@@ -4,25 +4,43 @@ import { api } from '@/api/supabaseClient';
 import { PREDEFINED_RULES } from '@/lib/rules';
 import { motion, AnimatePresence } from 'framer-motion';
 
+const CUSTOM_EMOJIS = ['📌', '🎯', '💡', '⚡', '🔒', '🧠', '🌱', '💼', '🏃', '🍃', '✅', '🛑', '🔥', '💪', '🧘', '🚫'];
+
 export default function AddRuleModal({ userId, existingRuleTitles = [], onAdded, onClose }) {
   const [ruleSearch, setRuleSearch] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
   const [selectedRule, setSelectedRule] = useState(null);
+  const [isCustom, setIsCustom] = useState(false);
+  const [customEmoji, setCustomEmoji] = useState('📌');
   const [hasRecurring, setHasRecurring] = useState(false);
   const [intervalDays, setIntervalDays] = useState(30);
   const [saving, setSaving] = useState(false);
 
   const existingLower = existingRuleTitles.map(t => t.toLowerCase());
-  const filteredRules = ruleSearch.trim()
+  const trimmed = ruleSearch.trim();
+
+  const filteredRules = trimmed
     ? PREDEFINED_RULES.filter(r =>
-        r.title.toLowerCase().includes(ruleSearch.toLowerCase()) &&
+        r.title.toLowerCase().includes(trimmed.toLowerCase()) &&
         !existingLower.includes(r.title.toLowerCase())
       )
     : [];
 
+  const showCustomOption =
+    trimmed.length >= 2 &&
+    !existingLower.includes(trimmed.toLowerCase()) &&
+    !PREDEFINED_RULES.some(r => r.title.toLowerCase() === trimmed.toLowerCase());
+
   function pickRule(rule) {
     setSelectedRule(rule);
     setRuleSearch(rule.title);
+    setShowDropdown(false);
+    setIsCustom(false);
+  }
+
+  function pickCustom() {
+    setSelectedRule({ title: trimmed, emoji: customEmoji, category: 'custom' });
+    setIsCustom(true);
     setShowDropdown(false);
   }
 
@@ -34,8 +52,8 @@ export default function AddRuleModal({ userId, existingRuleTitles = [], onAdded,
       const rule = await api.entities.Rule.create({
         user_id: userId,
         title: selectedRule.title,
-        category: selectedRule.category,
-        emoji: selectedRule.emoji,
+        category: selectedRule.category || 'custom',
+        emoji: isCustom ? customEmoji : selectedRule.emoji,
         current_streak: 0,
         longest_streak: 0,
         active: true,
@@ -73,11 +91,16 @@ export default function AddRuleModal({ userId, existingRuleTitles = [], onAdded,
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Search / type field */}
             <div className="relative">
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Search rules</label>
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">
+                Search or type a custom rule
+              </label>
               <div className="relative flex items-center">
                 {selectedRule && (
-                  <span className="absolute left-3 text-base pointer-events-none">{selectedRule.emoji}</span>
+                  <span className="absolute left-3 text-base pointer-events-none">
+                    {isCustom ? customEmoji : selectedRule.emoji}
+                  </span>
                 )}
                 <input
                   className={`w-full bg-input border border-border rounded-xl py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary ${selectedRule ? 'pl-9 pr-4' : 'px-4'}`}
@@ -86,14 +109,16 @@ export default function AddRuleModal({ userId, existingRuleTitles = [], onAdded,
                   onChange={e => {
                     setRuleSearch(e.target.value);
                     setSelectedRule(null);
+                    setIsCustom(false);
                     setShowDropdown(true);
                   }}
                   onFocus={() => setShowDropdown(true)}
                   onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
                 />
               </div>
+
               <AnimatePresence>
-                {showDropdown && filteredRules.length > 0 && (
+                {showDropdown && (filteredRules.length > 0 || showCustomOption) && (
                   <motion.div
                     initial={{ opacity: 0, y: -4 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -112,10 +137,55 @@ export default function AddRuleModal({ userId, existingRuleTitles = [], onAdded,
                         <span className="font-medium">{rule.title}</span>
                       </button>
                     ))}
+
+                    {showCustomOption && (
+                      <button
+                        type="button"
+                        onMouseDown={pickCustom}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-secondary text-left transition-colors border-t border-border"
+                      >
+                        <span className="text-base">✏️</span>
+                        <span className="font-medium text-muted-foreground">
+                          Add <span className="text-foreground font-semibold">"{trimmed}"</span> as custom rule
+                        </span>
+                      </button>
+                    )}
                   </motion.div>
                 )}
               </AnimatePresence>
             </div>
+
+            {/* Custom emoji picker */}
+            {isCustom && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="space-y-2"
+              >
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">
+                  Pick an emoji
+                </label>
+                <div className="grid grid-cols-8 gap-1.5">
+                  {CUSTOM_EMOJIS.map(e => (
+                    <motion.button
+                      key={e}
+                      type="button"
+                      whileTap={{ scale: 0.8 }}
+                      onClick={() => {
+                        setCustomEmoji(e);
+                        setSelectedRule(r => r ? { ...r, emoji: e } : r);
+                      }}
+                      className={`aspect-square text-xl rounded-lg flex items-center justify-center border-2 transition-all ${
+                        customEmoji === e ? 'border-primary bg-accent-muted' : 'border-transparent bg-secondary'
+                      }`}
+                    >
+                      {e}
+                    </motion.button>
+                  ))}
+                </div>
+              </motion.div>
+            )}
 
             {/* Recurring allowance */}
             <div className="flex items-center gap-3">

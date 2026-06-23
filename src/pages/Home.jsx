@@ -13,6 +13,7 @@ import MyPostsOverlay from '@/components/MyPostsOverlay';
 import PartnershipAgreementModal from '@/components/PartnershipAgreementModal';
 
 export default function Home({ currentUser, profile, onProfileUpdate }) {
+  const { message: homeToastMsg, show: showHomeToast } = useToast();
   const [rules, setRules] = useState([]);
   const [partnerships, setPartnerships] = useState([]);
   const [partnerProfiles, setPartnerProfiles] = useState({});
@@ -130,6 +131,7 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
 
   return (
     <div className="flex flex-col min-h-screen bg-background pb-24">
+      <Toast message={homeToastMsg} position="top" />
       <div className="max-w-lg mx-auto w-full px-4 pt-6 space-y-6">
 
         {/* Header */}
@@ -224,8 +226,7 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
                 <RuleCard
                   key={rule.id}
                   rule={rule}
-                  onUpdated={updated => setRules(prev => prev.map(r => r.id === updated.id ? updated : r))}
-                  onDeleted={id => setRules(prev => prev.filter(r => r.id !== id))}
+                  onDeleted={id => { setRules(prev => prev.filter(r => r.id !== id)); showHomeToast('Rule deleted ✓'); }}
                 />
               ))}
             </div>
@@ -425,7 +426,7 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
         <AddRuleModal
           userId={currentUser.id}
           existingRuleTitles={rules.map(r => r.title)}
-          onAdded={rule => setRules(prev => [...prev, rule])}
+          onAdded={rule => { setRules(prev => [...prev, rule]); showHomeToast('Rule added ✓'); }}
           onClose={() => setShowAddRule(false)}
         />
       )}
