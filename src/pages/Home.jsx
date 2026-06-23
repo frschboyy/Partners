@@ -321,39 +321,58 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
 
           {/* Fixed-height scrollable card list — sized to show ~2 cards */}
           <div className="overflow-y-auto space-y-3" style={{ maxHeight: 384 }}>
-            {/* Negotiating partnerships */}
+            {/* Negotiating partnerships — remain fully active, renegotiation is an overlay */}
             {negotiatingPartners.map(p => {
+              const partnerId = p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id;
               const partnerName = p.user_a_id === currentUser.id ? p.user_b_name : p.user_a_name;
+              const partnerProfile = partnerProfiles[partnerId];
               const iProposed = p.last_proposer_id === currentUser.id;
               return (
-                <div key={p.id} className="card-brutal p-3 flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-accent-muted flex items-center justify-center text-xl">
-                    {partnerProfiles[p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id]?.emoji_avatar || '🤝'}
+                <div key={p.id} className="card-brutal p-3">
+                  <div className="flex items-center gap-3">
+                    <Avatar profile={partnerProfile} size="sm" noAutoFlip />
+                    <div className="flex-1">
+                      <p className="font-semibold text-sm">{partnerName}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {p.penalty_amount > 0 ? `${p.penalty_amount} KSH / slip` : 'Honor system'} · <span className="text-yellow-500 font-semibold">Renegotiating</span>
+                      </p>
+                    </div>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={iProposed ? undefined : () => setShowAgreement(p)}
+                        disabled={iProposed}
+                        className="px-3 py-1.5 rounded-lg text-xs font-bold"
+                        style={iProposed
+                          ? { background: 'hsl(var(--muted))', color: 'hsl(var(--muted-foreground))', cursor: 'not-allowed', opacity: 0.6 }
+                          : { background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }
+                        }
+                      >
+                        {iProposed ? 'Pending' : 'Review'}
+                      </button>
+                      <motion.button
+                        whileTap={{ scale: 0.85 }}
+                        onClick={() => setRemovePartner({ partnership: p, partnerName })}
+                        className="p-2 rounded-lg bg-secondary text-muted-foreground"
+                        title="Cancel connection"
+                      >
+                        <UserX size={14} />
+                      </motion.button>
+                    </div>
                   </div>
-                  <div className="flex-1">
-                    <p className="font-semibold text-sm">{partnerName}</p>
-                    <p className="text-xs text-muted-foreground">Negotiating terms…</p>
-                  </div>
-                  <div className="flex gap-1">
+                  <PartnershipFinancials
+                    partnership={p}
+                    currentUserId={currentUser.id}
+                    currentUserName={profile?.display_name || currentUser.full_name}
+                    partnerName={partnerName}
+                    currencyLabel={profile?.currency_label || 'KSH'}
+                  />
+                  <div className="mt-2 pt-2 border-t border-border">
                     <button
-                      onClick={iProposed ? undefined : () => setShowAgreement(p)}
-                      disabled={iProposed}
-                      className="px-3 py-1.5 rounded-lg text-xs font-bold"
-                      style={iProposed
-                        ? { background: 'hsl(var(--muted))', color: 'hsl(var(--muted-foreground))', cursor: 'not-allowed', opacity: 0.6 }
-                        : { background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }
-                      }
+                      onClick={() => setReportSlip({ partnership: p, partnerName, partnerId })}
+                      className="flex items-center gap-1.5 text-xs text-muted-foreground"
                     >
-                      {iProposed ? 'Proposal Pending' : 'Open Agreement'}
+                      <AlertTriangle size={11} /> Report witnessed slip
                     </button>
-                    <motion.button
-                      whileTap={{ scale: 0.85 }}
-                      onClick={() => setRemovePartner({ partnership: p, partnerName })}
-                      className="p-2 rounded-lg bg-secondary text-muted-foreground"
-                      title="Cancel connection"
-                    >
-                      <UserX size={14} />
-                    </motion.button>
                   </div>
                 </div>
               );
@@ -425,7 +444,7 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
           currentUser={currentUser}
           profile={profile}
           rules={rules}
-          activePartnerships={activePartners}
+          activePartnerships={[...activePartners, ...negotiatingPartners]}
           partnerIds={partnerUserIds}
         />
 

@@ -24,7 +24,7 @@ export default function Leaderboard({ currentUser, profile }) {
     ]);
 
     const myPartnerships = allPartnerships.filter(
-      p => (p.user_a_id === currentUser.id || p.user_b_id === currentUser.id) && p.status === 'active'
+      p => (p.user_a_id === currentUser.id || p.user_b_id === currentUser.id) && (p.status === 'active' || p.status === 'negotiating')
     );
 
     const partnerIds = myPartnerships.map(p =>

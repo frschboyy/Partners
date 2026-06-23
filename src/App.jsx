@@ -116,7 +116,7 @@ function MainApp({ user }) {
   async function checkUnread() {
     const allPartnerships = await api.entities.Partnership.list();
     const myPartnerships = allPartnerships.filter(
-      p => (p.user_a_id === user.id || p.user_b_id === user.id) && p.status === 'active'
+      p => (p.user_a_id === user.id || p.user_b_id === user.id) && (p.status === 'active' || p.status === 'negotiating')
     );
     let total = 0;
     for (const p of myPartnerships) {

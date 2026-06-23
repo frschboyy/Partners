@@ -25,7 +25,7 @@ export default function Feed({ currentUser, profile }) {
       // Partnerships first so we can scope all subsequent queries to relevant users only
       const allPartnerships = await api.entities.Partnership.list();
       const myPartnerships = allPartnerships.filter(
-        p => (p.user_a_id === currentUser.id || p.user_b_id === currentUser.id) && p.status === 'active'
+        p => (p.user_a_id === currentUser.id || p.user_b_id === currentUser.id) && (p.status === 'active' || p.status === 'negotiating')
       );
       setPartnerships(myPartnerships);
 
