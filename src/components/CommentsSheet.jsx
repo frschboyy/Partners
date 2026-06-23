@@ -37,6 +37,8 @@ export default function CommentsSheet({
     setReplyingTo(null);
     setExpandedReplies({});
     loadComments();
+    // Delay focus until the slide-up animation settles — focusing immediately
+    // causes the iOS keyboard to open mid-animation and scroll the view erratically.
     setTimeout(() => commentInputRef.current?.focus(), 200);
   }, [open, postId]);
 
@@ -60,6 +62,8 @@ export default function CommentsSheet({
     setSendingComment(true);
     const text = commentText.trim();
     const replyId = replyingTo?.id || null;
+    // 'opt_' prefix marks this as an uncommitted entry so delete/like guards can
+    // skip API calls before the real DB id is known.
     const optimistic = {
       id: `opt_${Date.now()}`,
       post_id: postId,
@@ -73,6 +77,7 @@ export default function CommentsSheet({
     setComments(prev => [...prev, optimistic]);
     setCommentText('');
     setReplyingTo(null);
+    // Defer one tick so the optimistic comment has rendered and scrollHeight is current.
     setTimeout(() => {
       if (commentsScrollRef.current) {
         commentsScrollRef.current.scrollTop = commentsScrollRef.current.scrollHeight;
@@ -95,7 +100,7 @@ export default function CommentsSheet({
       }
     } catch (err) {
       setComments(prev => prev.filter(c => c.id !== optimistic.id));
-      setCommentText(text);
+      setCommentText(text); // Restore typed text so the user can retry without retyping.
       console.error('Comment save failed:', err?.message || err);
     }
     setSendingComment(false);
@@ -105,6 +110,7 @@ export default function CommentsSheet({
     const backup = comments.find(c => c.id === id);
     setComments(prev => prev.filter(c => c.id !== id));
     setCommentMenuId(null);
+    // Optimistic comments have no DB record yet — nothing to delete server-side.
     if (!id.startsWith('opt_')) {
       try {
         await api.entities.ChatMessage.delete(id);
@@ -132,6 +138,7 @@ export default function CommentsSheet({
       const hasLiked = liked.includes(currentUserId);
       return { ...c, liked_by: hasLiked ? liked.filter(id => id !== currentUserId) : [...liked, currentUserId] };
     }));
+    // Optimistic comments aren't in the DB yet — UI toggle already applied above.
     if (commentId.startsWith('opt_')) return;
     const comment = comments.find(c => c.id === commentId);
     if (!comment) return;

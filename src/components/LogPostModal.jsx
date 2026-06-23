@@ -11,6 +11,7 @@ const POST_TYPES = [
   { id: 'slip', label: '😔 Slip', desc: 'Own it honestly' },
 ];
 
+// Groq cold-start can take ~8s; add network overhead and leave a comfortable margin.
 const TRANSCRIBE_TIMEOUT_MS = 15000;
 
 export default function LogPostModal({ currentUser, profile, rules = [], partnerIds = [], onPosted, onClose }) {
@@ -156,62 +157,67 @@ export default function LogPostModal({ currentUser, profile, rules = [], partner
     const today = new Date().toISOString().split('T')[0];
     const visibleTo = [currentUser.id, ...partnerIds];
 
-    if (postType === 'slip') {
-      const rule = rules.find(r => r.id === slipRuleId);
-      const penalty = rule?.penalty_amount || 0;
-      await api.entities.Slip.create({
+    try {
+      if (postType === 'slip') {
+        const rule = rules.find(r => r.id === slipRuleId);
+        const penalty = rule?.penalty_amount || 0;
+        await api.entities.Slip.create({
+          user_id: currentUser.id,
+          rule_id: slipRuleId,
+          rule_title: rule?.title || '',
+          penalty_amount: penalty,
+          slip_type: 'self',
+          status: 'confirmed',
+          slip_date: today,
+          notes: caption,
+        });
+        if (profile && penalty > 0) {
+          await api.entities.UserProfile.update(profile.id, {
+            total_owed: (profile.total_owed || 0) + penalty,
+          });
+        }
+        if (rule) {
+          await api.entities.Rule.update(slipRuleId, {
+            current_streak: 0,
+            last_slip_date: today,
+          });
+        }
+      }
+
+      // One post per log; all photos stored in photo_urls array, photo_url holds the first for thumbnail
+      const postData = {
         user_id: currentUser.id,
-        rule_id: slipRuleId,
-        rule_title: rule?.title || '',
-        penalty_amount: penalty,
-        slip_type: 'self',
-        status: 'confirmed',
-        slip_date: today,
-        notes: caption,
-      });
-      if (profile && penalty > 0) {
-        await api.entities.UserProfile.update(profile.id, {
-          total_owed: (profile.total_owed || 0) + penalty,
-        });
+        author_name: profile?.display_name || currentUser.full_name,
+        author_emoji: profile?.emoji_avatar || '😎',
+        post_type: postType,
+        caption,
+        photo_url: photoUrls[0] || '',
+        photo_urls: photoUrls,
+        post_date: today,
+        visible_to: visibleTo,
+        reactions: [],
+      };
+      if (postType === 'workout') {
+        postData.workout_type = workoutType;
+        postData.workout_duration = Number(workoutDuration);
       }
-      if (rule) {
-        await api.entities.Rule.update(slipRuleId, {
-          current_streak: 0,
-          last_slip_date: today,
-        });
+      if (postType === 'slip') {
+        const rule = rules.find(r => r.id === slipRuleId);
+        postData.rule_id = slipRuleId;
+        postData.rule_title = rule?.title || '';
+        postData.penalty_applied = rule?.penalty_amount || 0;
       }
-    }
+      await api.entities.Post.create(postData);
 
-    // One post per log; all photos stored in photo_urls array, photo_url holds the first for thumbnail
-    const postData = {
-      user_id: currentUser.id,
-      author_name: profile?.display_name || currentUser.full_name,
-      author_emoji: profile?.emoji_avatar || '😎',
-      post_type: postType,
-      caption,
-      photo_url: photoUrls[0] || '',
-      photo_urls: photoUrls,
-      post_date: today,
-      visible_to: visibleTo,
-      reactions: [],
-    };
-    if (postType === 'workout') {
-      postData.workout_type = workoutType;
-      postData.workout_duration = Number(workoutDuration);
+      showToast('Post logged!');
+      setTimeout(() => {
+        onPosted?.();
+        onClose();
+      }, 900);
+    } catch (err) {
+      console.error('Failed to submit post:', err?.message || err);
+      showToast('Failed to post — please try again');
     }
-    if (postType === 'slip') {
-      const rule = rules.find(r => r.id === slipRuleId);
-      postData.rule_id = slipRuleId;
-      postData.rule_title = rule?.title || '';
-      postData.penalty_applied = rule?.penalty_amount || 0;
-    }
-    await api.entities.Post.create(postData);
-
-    showToast('Post logged!');
-    setTimeout(() => {
-      onPosted?.();
-      onClose();
-    }, 900);
     setSaving(false);
   }
 

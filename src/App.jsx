@@ -26,12 +26,14 @@ import BottomNav from './components/BottomNav';
 import NotificationsPanel from './components/NotificationsPanel';
 import { AnimatePresence } from 'framer-motion';
 
+// The app has no traditional page stack — the back button should never eject the
+// user to whatever was open before they launched it (e.g. the browser home screen).
+// We push a sentinel history entry on mount, then re-push whenever popstate fires so
+// there is always an entry ahead of the current one for the browser to "pop" to.
 function useBlockBrowserBack() {
   React.useEffect(() => {
-    // Push a dummy state so the user always has somewhere to "go back" to within the app
     window.history.pushState({ Partnerz: true }, '');
-    const handler = (e) => {
-      // Re-push so the back button never exits the SPA while logged in
+    const handler = () => {
       window.history.pushState({ Partnerz: true }, '');
     };
     window.addEventListener('popstate', handler);

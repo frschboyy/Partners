@@ -17,3 +17,8 @@ export function formatDateTime(dateStr) {
   if (!dateStr) return '';
   return new Date(dateStr).toLocaleString();
 }
+
+export function formatDate(dateStr) {
+  if (!dateStr) return '';
+  return new Date(dateStr).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}

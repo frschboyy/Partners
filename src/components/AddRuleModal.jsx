@@ -3,10 +3,12 @@ import { X } from 'lucide-react';
 import { api } from '@/api/supabaseClient';
 import { PREDEFINED_RULES } from '@/lib/rules';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useToast, Toast } from '@/components/Toast';
 
 const CUSTOM_EMOJIS = ['📌', '🎯', '💡', '⚡', '🔒', '🧠', '🌱', '💼', '🏃', '🍃', '✅', '🛑', '🔥', '💪', '🧘', '🚫'];
 
 export default function AddRuleModal({ userId, existingRuleTitles = [], onAdded, onClose }) {
+  const { message: toastMessage, show: showToast } = useToast();
   const [ruleSearch, setRuleSearch] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
   const [selectedRule, setSelectedRule] = useState(null);
@@ -62,6 +64,9 @@ export default function AddRuleModal({ userId, existingRuleTitles = [], onAdded,
       });
       onAdded?.(rule);
       onClose?.();
+    } catch (err) {
+      console.error('Failed to add rule:', err);
+      showToast('Failed to add rule — please try again');
     } finally {
       setSaving(false);
     }
@@ -83,26 +88,28 @@ export default function AddRuleModal({ userId, existingRuleTitles = [], onAdded,
           exit={{ y: '100%' }}
           transition={{ type: 'spring', damping: 25, stiffness: 300 }}
         >
+          <Toast message={toastMessage} />
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold font-heading">Add a Rule</h2>
-            <button onClick={onClose} className="p-2 rounded-full bg-secondary">
-              <X size={18} />
+            <button onClick={onClose} aria-label="Close" className="p-2 rounded-full bg-secondary">
+              <X size={18} aria-hidden="true" />
             </button>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Search / type field */}
             <div className="relative">
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">
+              <label htmlFor="rule-search" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">
                 Search or type a custom rule
               </label>
               <div className="relative flex items-center">
                 {selectedRule && (
-                  <span className="absolute left-3 text-base pointer-events-none">
+                  <span className="absolute left-3 text-base pointer-events-none" aria-hidden="true">
                     {isCustom ? customEmoji : selectedRule.emoji}
                   </span>
                 )}
                 <input
+                  id="rule-search"
                   className={`w-full bg-input border border-border rounded-xl py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary ${selectedRule ? 'pl-9 pr-4' : 'px-4'}`}
                   placeholder="e.g. No Alcohol, Daily Running…"
                   value={ruleSearch}
@@ -201,14 +208,15 @@ export default function AddRuleModal({ userId, existingRuleTitles = [], onAdded,
             </div>
             {hasRecurring && (
               <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">Allow once every</span>
+                <label htmlFor="interval-days" className="text-sm text-muted-foreground">Allow once every</label>
                 <input
+                  id="interval-days"
                   type="number"
                   className="w-16 bg-input border border-border rounded px-2 py-1 text-sm text-foreground"
                   value={intervalDays}
                   onChange={e => setIntervalDays(e.target.value)}
                 />
-                <span className="text-sm text-muted-foreground">days</span>
+                <span className="text-sm text-muted-foreground" aria-hidden="true">days</span>
               </div>
             )}
 

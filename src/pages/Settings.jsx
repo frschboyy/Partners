@@ -122,12 +122,16 @@ export default function Settings({ currentUser, profile, onProfileUpdate, curren
   async function handlePhotoUpload(e) {
     const file = e.target.files[0];
     if (!file || !profile) return;
-    const { file_url } = await api.integrations.Core.UploadFile({ file });
-    const updated = await api.entities.UserProfile.update(profile.id, {
-      photo_avatar_url: file_url,
-      avatar_mode: 'flip',
-    });
-    onProfileUpdate?.(updated);
+    try {
+      const { file_url } = await api.integrations.Core.UploadFile({ file });
+      const updated = await api.entities.UserProfile.update(profile.id, {
+        photo_avatar_url: file_url,
+        avatar_mode: 'flip',
+      });
+      onProfileUpdate?.(updated);
+    } catch (err) {
+      showToast('Photo upload failed — please try again');
+    }
   }
 
   async function removePhoto() {

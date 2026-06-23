@@ -22,6 +22,8 @@ serve(async (req) => {
 
     if (action === 'transcribe') {
       const { audio_url } = params as { audio_url: string };
+      // Groq's transcription endpoint only accepts binary file uploads, not URLs.
+      // Fetch the audio from Supabase Storage and re-post it as multipart FormData.
       const audioResp = await fetch(audio_url);
       const blob = await audioResp.blob();
       const form = new FormData();

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { api } from '@/api/supabaseClient';
+import { formatDate } from '@/lib/dateUtils';
 
 export default function PartnershipFinancials({ partnership, currentUserId, currentUserName, partnerName, currencyLabel = 'KSH' }) {
   const [slips, setSlips] = useState(null);
@@ -14,8 +15,13 @@ export default function PartnershipFinancials({ partnership, currentUserId, curr
 
   async function loadSlips() {
     setLoading(true);
-    const all = await api.entities.Slip.filter({ partnership_id: partnership.id });
-    setSlips(all.filter(s => s.status !== 'disputed'));
+    try {
+      const all = await api.entities.Slip.filter({ partnership_id: partnership.id });
+      setSlips(all.filter(s => s.status !== 'disputed'));
+    } catch (err) {
+      console.error('Failed to load slips:', err);
+      setSlips([]);
+    }
     setLoading(false);
   }
 
@@ -29,8 +35,6 @@ export default function PartnershipFinancials({ partnership, currentUserId, curr
   const amountLost = mySlips.reduce((sum, s) => sum + (s.penalty_waived ? 0 : (s.penalty_amount || 0)), 0);
   const amountGained = partnerSlips.reduce((sum, s) => sum + (s.penalty_waived ? 0 : (s.penalty_amount || 0)), 0);
   const net = amountGained - amountLost;
-
-  const formatDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
 
   const netLabel = net < 0
     ? `You owe ${partnerName}`

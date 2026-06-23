@@ -38,6 +38,8 @@ export function entityClient(tableName) {
       if (error) throw error;
     },
     subscribe(callback) {
+      // Random suffix prevents multiple active subscribers on the same table from
+      // sharing a channel and receiving each other's callbacks.
       const channelName = `${tableName}-${Math.random().toString(36).slice(2)}`;
       const channel = supabase.channel(channelName)
         .on('postgres_changes', { event: '*', schema: 'public', table: tableName },

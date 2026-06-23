@@ -25,26 +25,29 @@ export default function BottomNav({ activeTab, onTabChange, unreadMessages = 0, 
               key={id}
               whileTap={{ scale: 0.85, opacity: 0.7 }}
               onClick={() => onTabChange(id)}
+              aria-label={badge > 0 ? `${label}, ${badge} unread` : label}
+              aria-current={isActive ? 'page' : undefined}
               className="flex flex-col items-center gap-0.5 px-2 py-2 rounded-lg min-w-[44px] relative"
               style={{
                 color: isActive ? 'hsl(var(--theme-accent))' : 'hsl(var(--muted-foreground))',
               }}
             >
               <div className="relative">
-                <Icon size={21} strokeWidth={isActive ? 2.5 : 1.8} />
+                <Icon size={21} strokeWidth={isActive ? 2.5 : 1.8} aria-hidden="true" />
                 {badge > 0 && (
-                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-destructive rounded-full text-[9px] font-bold text-white flex items-center justify-center">
+                  <span aria-hidden="true" className="absolute -top-1 -right-1 w-4 h-4 bg-destructive rounded-full text-[9px] font-bold text-white flex items-center justify-center">
                     {badge > 9 ? '9+' : badge}
                   </span>
                 )}
                 {showFeedDot && (
                   <span
+                    aria-hidden="true"
                     className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full"
                     style={{ background: 'hsl(var(--theme-accent))' }}
                   />
                 )}
               </div>
-              <span className="text-[10px] font-medium leading-none">{label}</span>
+              <span aria-hidden="true" className="text-[10px] font-medium leading-none">{label}</span>
               {isActive && (
                 <motion.div
                   layoutId="nav-indicator"

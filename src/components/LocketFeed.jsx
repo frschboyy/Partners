@@ -26,6 +26,7 @@ export default function LocketFeed({
   const nextCardY = useTransform(y, v => v + OFFSCREEN_PY());
 
   const goNext = useCallback(() => {
+    // Ref flag (not state) prevents rapid swipes from queuing conflicting animations.
     if (transitioning.current || currentIndex >= posts.length - 1) {
       animate(y, 0, { type: 'spring', stiffness: 400, damping: 40 });
       return;

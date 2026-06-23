@@ -37,6 +37,8 @@ export default function Chat({ currentUser, profile }) {
   const typingTimersRef = useRef({});
   const typingThrottleRef = useRef(null);
 
+  // Keep a mutable ref in sync so the global ChatMessage subscription (which only
+  // mounts once on [currentUser]) can read the current chat without being re-subscribed.
   useEffect(() => { selectedPartnershipRef.current = selectedPartnership; }, [selectedPartnership]);
 
   useEffect(() => {
@@ -158,50 +160,58 @@ export default function Chat({ currentUser, profile }) {
   }, [messages]);
 
   async function loadPartnerships() {
-    const [allPartnerships, allProfiles] = await Promise.all([
-      api.entities.Partnership.list(),
-      api.entities.UserProfile.list(),
-    ]);
+    try {
+      const [allPartnerships, allProfiles] = await Promise.all([
+        api.entities.Partnership.list(),
+        api.entities.UserProfile.list(),
+      ]);
 
-    const myPartnerships = allPartnerships.filter(
-      p => (p.user_a_id === currentUser.id || p.user_b_id === currentUser.id) &&
-        (p.status === 'active' || p.status === 'negotiating')
-    );
-    setPartnerships(myPartnerships);
+      const myPartnerships = allPartnerships.filter(
+        p => (p.user_a_id === currentUser.id || p.user_b_id === currentUser.id) &&
+          (p.status === 'active' || p.status === 'negotiating')
+      );
+      setPartnerships(myPartnerships);
 
-    const profileMap = {};
-    allProfiles.forEach(pr => { profileMap[pr.user_id] = pr; });
-    if (profile) profileMap[currentUser.id] = profile;
-    setPartnerProfiles(profileMap);
+      const profileMap = {};
+      allProfiles.forEach(pr => { profileMap[pr.user_id] = pr; });
+      if (profile) profileMap[currentUser.id] = profile;
+      setPartnerProfiles(profileMap);
 
-    // Fetch last message + unread count per partnership (desc so first = most recent)
-    const unread = {};
-    const activity = {};
-    for (const p of myPartnerships) {
-      const msgs = await api.entities.ChatMessage.filter({ partnership_id: p.id }, '-created_at', 50);
-      unread[p.id] = msgs.filter(m => !m.is_deleted && !m.read_by?.includes(currentUser.id) && m.sender_id !== currentUser.id).length;
-      const latest = msgs.find(m => !m.is_deleted);
-      if (latest) {
-        activity[p.id] = { time: latest.created_at, text: latest.content, senderId: latest.sender_id, msgType: latest.message_type };
-      }
+      // Fetch last message + unread count per partnership in parallel
+      const unread = {};
+      const activity = {};
+      await Promise.all(myPartnerships.map(async p => {
+        const msgs = await api.entities.ChatMessage.filter({ partnership_id: p.id }, '-created_at', 50);
+        unread[p.id] = msgs.filter(m => !m.is_deleted && !m.read_by?.includes(currentUser.id) && m.sender_id !== currentUser.id).length;
+        const latest = msgs.find(m => !m.is_deleted);
+        if (latest) {
+          activity[p.id] = { time: latest.created_at, text: latest.content, senderId: latest.sender_id, msgType: latest.message_type };
+        }
+      }));
+      setUnreadCounts(unread);
+      setLastActivity(activity);
+    } catch (err) {
+      console.error('Failed to load partnerships:', err);
     }
-    setUnreadCounts(unread);
-    setLastActivity(activity);
   }
 
   async function loadMessages(partnershipId) {
     setLoadingMessages(true);
-    const msgs = await api.entities.ChatMessage.filter({ partnership_id: partnershipId }, 'created_at', 100);
-    setMessages(msgs);
-    setLoadingMessages(false);
-    // Mark as read
-    const unread = msgs.filter(m => !m.read_by?.includes(currentUser.id) && m.sender_id !== currentUser.id);
-    await Promise.all(
-      unread.map(m =>
-        api.entities.ChatMessage.update(m.id, { read_by: [...(m.read_by || []), currentUser.id] })
-      )
-    );
-    setUnreadCounts(prev => ({ ...prev, [partnershipId]: 0 }));
+    try {
+      const msgs = await api.entities.ChatMessage.filter({ partnership_id: partnershipId }, 'created_at', 100);
+      setMessages(msgs);
+      const unread = msgs.filter(m => !m.read_by?.includes(currentUser.id) && m.sender_id !== currentUser.id);
+      await Promise.all(
+        unread.map(m =>
+          api.entities.ChatMessage.update(m.id, { read_by: [...(m.read_by || []), currentUser.id] })
+        )
+      );
+      setUnreadCounts(prev => ({ ...prev, [partnershipId]: 0 }));
+    } catch (err) {
+      console.error('Failed to load messages:', err);
+    } finally {
+      setLoadingMessages(false);
+    }
   }
 
   async function saveEdit(msg) {
@@ -248,20 +258,25 @@ export default function Chat({ currentUser, profile }) {
     clearTimeout(typingThrottleRef.current);
     const ch = typingChannelsRef.current[selectedPartnership.id];
     if (ch) ch.track({ user_id: currentUser.id, isTyping: false });
-    const msg = await api.entities.ChatMessage.create({
-      partnership_id: selectedPartnership.id,
-      sender_id: currentUser.id,
-      sender_name: profile?.display_name || currentUser.full_name,
-      content,
-      message_type: 'text',
-      read_by: [currentUser.id],
-    });
-    // Only add if not already added by the subscription (dedupe by id)
-    setMessages(prev => {
-      const exists = prev.some(m => m.id === msg.id);
-      if (exists) return prev;
-      return [...prev, msg];
-    });
+    try {
+      const msg = await api.entities.ChatMessage.create({
+        partnership_id: selectedPartnership.id,
+        sender_id: currentUser.id,
+        sender_name: profile?.display_name || currentUser.full_name,
+        content,
+        message_type: 'text',
+        read_by: [currentUser.id],
+      });
+      // Only add if not already added by the subscription (dedupe by id)
+      setMessages(prev => {
+        const exists = prev.some(m => m.id === msg.id);
+        if (exists) return prev;
+        return [...prev, msg];
+      });
+    } catch (err) {
+      setText(content); // restore text so user doesn't lose their message
+      console.error('Failed to send message:', err);
+    }
     setSending(false);
   }
 

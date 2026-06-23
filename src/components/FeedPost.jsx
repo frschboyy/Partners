@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef } from 'react';
 import { MessageCircle, ChevronLeft, ChevronRight, Smile, Pencil, Trash2, X, Plus } from 'lucide-react';
 import { motion, AnimatePresence, useMotionValue, animate } from 'framer-motion';
 import { api } from '@/api/supabaseClient';
@@ -7,6 +7,7 @@ import { compressImage } from '@/lib/imageUtils';
 import { useToast, Toast } from '@/components/Toast';
 import CommentsSheet from '@/components/CommentsSheet';
 import { EMOJI_REACTIONS, POST_TYPE_LABELS, POST_TYPE_EMOJI } from '@/lib/constants';
+import { usePostReactions } from '@/lib/usePostReactions';
 
 const DRAG_IMG_THRESHOLD = 50;
 const cardW = () => window.innerWidth - 32;
@@ -25,7 +26,6 @@ export default function FeedPost({
   const [focused, setFocused] = useState(false);
   const [imageIndex, setImageIndex] = useState(0);
   const [showReactions, setShowReactions] = useState(false);
-  const [localReactions, setLocalReactions] = useState(null);
   const [showGrid, setShowGrid] = useState(false);
   const [gridFocusPost, setGridFocusPost] = useState(null);
   const [showComments, setShowComments] = useState(false);
@@ -49,14 +49,12 @@ export default function FeedPost({
   const isMyPost = post.user_id === currentUserId;
   const authorProfile = profiles[post.user_id];
 
-  const reactions = localReactions ?? (post.reactions || []);
-  const myReaction = reactions.find(r => r.user_id === currentUserId);
-  const reactionGroups = {};
-  reactions.forEach(r => { reactionGroups[r.emoji] = (reactionGroups[r.emoji] || 0) + 1; });
+  const { reactions, myReaction, reactionGroups, toggleReaction: _toggleReaction } = usePostReactions(post, currentUserId);
 
   // ─── Carousel ────────────────────────────────────────────────────────────────
 
   function goImageNext() {
+    // Ref flag prevents rapid swipes from queuing animations that fight each other.
     if (imageTransitioning.current) return;
     if (imageIndex >= photoUrls.length - 1) {
       animate(imageX, -imageIndex * cardW(), { type: 'spring', stiffness: 400, damping: 40 });
@@ -88,31 +86,10 @@ export default function FeedPost({
 
   // ─── Reactions ───────────────────────────────────────────────────────────────
 
-  const toggleReaction = useCallback(async (emoji) => {
-    setLocalReactions(prev => {
-      const base = prev ?? (post.reactions || []);
-      const existing = base.find(r => r.user_id === currentUserId);
-      if (existing) {
-        if (existing.emoji === emoji) return base.filter(r => r.user_id !== currentUserId);
-        return base.map(r => r.user_id === currentUserId ? { ...r, emoji } : r);
-      }
-      return [...base, { user_id: currentUserId, emoji, created_at: new Date().toISOString() }];
-    });
+  async function toggleReaction(emoji) {
     setShowReactions(false);
-
-    const current = localReactions ?? (post.reactions || []);
-    const existing = current.find(r => r.user_id === currentUserId);
-    let updated;
-    if (existing) {
-      if (existing.emoji === emoji) updated = current.filter(r => r.user_id !== currentUserId);
-      else updated = current.map(r => r.user_id === currentUserId ? { ...r, emoji } : r);
-    } else {
-      updated = [...current, { user_id: currentUserId, emoji, created_at: new Date().toISOString() }];
-    }
-    try {
-      await api.entities.Post.update(post.id, { reactions: updated });
-    } catch (_) {}
-  }, [post, currentUserId, localReactions]);
+    await _toggleReaction(emoji);
+  }
 
   function openComments(targetPostId = null) {
     const id = targetPostId || post.id;

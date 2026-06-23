@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { api, supabase } from '@/api/supabaseClient';
 import LocketFeed from '@/components/LocketFeed';
 import { motion } from 'framer-motion';
+import { useToast, Toast } from '@/components/Toast';
 
 export default function Feed({ currentUser, profile }) {
+  const { message: feedToastMessage, show: showFeedToast } = useToast();
   const [posts, setPosts] = useState([]);
   const [profiles, setProfiles] = useState({});
   const [allPostsByUser, setAllPostsByUser] = useState({});
@@ -100,6 +102,7 @@ export default function Feed({ currentUser, profile }) {
       setCommentCounts(counts);
     } catch (err) {
       console.error('Failed to load feed:', err?.message || err);
+      showFeedToast('Failed to load feed — please refresh');
     }
     setLoading(false);
   }
@@ -114,6 +117,7 @@ export default function Feed({ currentUser, profile }) {
 
   return (
     <div className="h-full relative">
+      <Toast message={feedToastMessage} />
       <LocketFeed
         posts={posts}
         currentUserId={currentUser.id}

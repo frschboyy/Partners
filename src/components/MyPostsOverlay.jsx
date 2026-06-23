@@ -6,6 +6,7 @@ import { compressImage } from '@/lib/imageUtils';
 import { useToast, Toast } from '@/components/Toast';
 import CommentsSheet from '@/components/CommentsSheet';
 import { EMOJI_REACTIONS, POST_TYPE_EMOJI } from '@/lib/constants';
+import { usePostReactions } from '@/lib/usePostReactions';
 
 export default function MyPostsOverlay({ posts, profile, currentUserId, profiles = {}, onClose, onRefresh }) {
   const [focusedPost, setFocusedPost] = useState(null);
@@ -24,7 +25,7 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
 
   // Reactions
   const [showReactions, setShowReactions] = useState(false);
-  const [localReactions, setLocalReactions] = useState(null);
+  const { reactions, myReaction, reactionGroups, toggleReaction: _toggleReaction } = usePostReactions(focusedPost, currentUserId);
 
   // Comments
   const [showComments, setShowComments] = useState(false);
@@ -62,11 +63,6 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
     }
   }
 
-  const reactions = localReactions ?? (focusedPost?.reactions || []);
-  const myReaction = reactions.find(r => r.user_id === currentUserId);
-  const reactionGroups = {};
-  reactions.forEach(r => { reactionGroups[r.emoji] = (reactionGroups[r.emoji] || 0) + 1; });
-
   const focusedPhotoUrls = focusedPost
     ? (focusedPost.photo_urls?.length > 0 ? focusedPost.photo_urls : (focusedPost.photo_url ? [focusedPost.photo_url] : []))
     : [];
@@ -74,7 +70,6 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
   function openPost(p) {
     setFocusedPost(p);
     setImageIndex(0);
-    setLocalReactions(null);
     setShowReactions(false);
     setShowComments(false);
     setConfirmDelete(false);
@@ -87,27 +82,13 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
     setEditOverlayOpen(false);
     setConfirmDelete(false);
     setShowComments(false);
-    setLocalReactions(null);
   }
 
   // ─── Reactions ────────────────────────────────────────────────────────────
 
   async function toggleReaction(emoji) {
-    if (!focusedPost) return;
-    const base = localReactions ?? (focusedPost.reactions || []);
-    const existing = base.find(r => r.user_id === currentUserId);
-    let updated;
-    if (existing) {
-      if (existing.emoji === emoji) updated = base.filter(r => r.user_id !== currentUserId);
-      else updated = base.map(r => r.user_id === currentUserId ? { ...r, emoji } : r);
-    } else {
-      updated = [...base, { user_id: currentUserId, emoji, created_at: new Date().toISOString() }];
-    }
-    setLocalReactions(updated);
     setShowReactions(false);
-    try {
-      await api.entities.Post.update(focusedPost.id, { reactions: updated });
-    } catch (_) {}
+    await _toggleReaction(emoji);
   }
 
   // ─── Edit ─────────────────────────────────────────────────────────────────
