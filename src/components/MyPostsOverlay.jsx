@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { X, ChevronLeft, ChevronRight, Pencil, Trash2, MessageCircle, Smile, Send, Plus, Maximize2, Minimize2, CornerDownRight, Home } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Pencil, Trash2, MessageCircle, Smile, Send, Plus, Maximize2, Minimize2, CornerDownRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '@/api/supabaseClient';
 import { compressImage } from '@/lib/imageUtils';
@@ -281,18 +281,16 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
       <Toast message={toastMsg} position="top" />
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
 
-      {/* Drag handle — only in grid view */}
-      {!focusedPost && (
-        <div
-          className="flex justify-center pt-2.5 pb-1 flex-shrink-0 select-none"
-          style={{ touchAction: 'none' }}
-          onTouchStart={handleDragStart}
-          onTouchMove={handleDragMove}
-          onTouchEnd={handleDragEnd}
-        >
-          <div className="w-12 h-1 rounded-full bg-muted-foreground/25" />
-        </div>
-      )}
+      {/* Drag handle — always visible, always closes the overlay */}
+      <div
+        className="flex justify-center pt-2.5 pb-1 flex-shrink-0 select-none"
+        style={{ touchAction: 'none' }}
+        onTouchStart={handleDragStart}
+        onTouchMove={handleDragMove}
+        onTouchEnd={handleDragEnd}
+      >
+        <div className="w-12 h-1 rounded-full bg-muted-foreground/25" />
+      </div>
 
       {/* Header */}
       <div className="grid grid-cols-3 items-center px-4 py-3 border-b border-border flex-shrink-0">
@@ -305,17 +303,7 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
             {focusedPost ? <ChevronLeft size={16} /> : <X size={16} />}
           </motion.button>
         </div>
-        <div className="flex justify-center">
-          {focusedPost && (
-            <motion.button
-              whileTap={{ scale: 0.85 }}
-              onClick={onClose}
-              className="p-2 rounded-full bg-secondary"
-            >
-              <Home size={16} />
-            </motion.button>
-          )}
-        </div>
+        <div />
         <div className="flex justify-end gap-1.5">
           {focusedPost && (
             <>
