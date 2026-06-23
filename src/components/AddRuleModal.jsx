@@ -20,8 +20,10 @@ const CUSTOM_EMOJIS = [
   '💰', '💵', '📈', '🏦', '💳',
   // Digital & social
   '📱', '🎮', '📺', '💬', '🤳',
+  // Food & drink to reduce
+  '🍞', '🥛', '🧁', '🍰', '🍪', '🍩', '🍦', '🧇', '🥞', '🍔', '🌭', '🍕', '🌮', '🍜', '🍿', '🧂', '🧃', '🥤', '🧋', '☕', '🧊',
   // Vices to quit
-  '🍺', '🍷', '🚬', '🍫', '🍟', '🎰',
+  '🍺', '🍷', '🚬', '🚭', '💨', '🍫', '🍟', '🎰', '💊', '🫧',
   // Warning symbols
   '🚫', '🔒', '⚠️', '🛑', '❌', '🚷',
   // Motivation & nature
@@ -196,7 +198,7 @@ export default function AddRuleModal({ userId, existingRuleTitles = [], onAdded,
                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">
                   Pick an emoji
                 </label>
-                <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                <div className="grid grid-rows-3 grid-flow-col gap-1.5 overflow-x-auto pb-1 scrollbar-none">
                   {CUSTOM_EMOJIS.map(e => (
                     <motion.button
                       key={e}
