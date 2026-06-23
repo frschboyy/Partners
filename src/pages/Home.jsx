@@ -291,13 +291,13 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
               ))}
             </div>
           ) : rules.length === 0 ? (
-            <div className="card-brutal p-6 text-center">
+            <div className="card-brutal p-6 text-center animate-content-reveal">
               <p className="text-3xl mb-2">📋</p>
               <p className="font-semibold">No rules yet</p>
               <p className="text-sm text-muted-foreground mt-1">Add your first NO to start your streak.</p>
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-2 animate-content-reveal">
               {rules.map(rule => (
                 <RuleCard
                   key={rule.id}
@@ -389,7 +389,7 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
 
             {/* Empty state */}
             {!loading && activePartners.length === 0 && negotiatingPartners.length === 0 && (
-              <div className="card-brutal p-6 text-center">
+              <div className="card-brutal p-6 text-center animate-content-reveal">
                 <p className="text-3xl mb-2">🔭</p>
                 <p className="font-semibold">No partners yet</p>
                 <p className="text-sm text-muted-foreground mt-1">Tap Discover to find your accountability crew.</p>
@@ -402,7 +402,7 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
               const partnerName = p.user_a_id === currentUser.id ? p.user_b_name : p.user_a_name;
               const partnerProfile = partnerProfiles[partnerId];
               return (
-                <div key={p.id} className="card-brutal p-3">
+                <div key={p.id} className="card-brutal p-3 animate-content-reveal">
                   <div className="flex items-center gap-3">
                     <Avatar profile={partnerProfile} size="sm" noAutoFlip />
                     <div className="flex-1">

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Home, Rss, MessageCircle, Trophy, Bell, Settings } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { haptic } from '@/lib/haptic';
 
 const TABS = [
   { id: 'home', label: 'Home', icon: Home },
@@ -24,7 +25,7 @@ export default function BottomNav({ activeTab, onTabChange, unreadMessages = 0, 
             <motion.button
               key={id}
               whileTap={{ scale: 0.85, opacity: 0.7 }}
-              onClick={() => onTabChange(id)}
+              onClick={() => { haptic([8]); onTabChange(id); }}
               aria-label={badge > 0 ? `${label}, ${badge} unread` : label}
               aria-current={isActive ? 'page' : undefined}
               className="flex flex-col items-center gap-0.5 px-2 py-2 rounded-lg min-w-[44px] relative"

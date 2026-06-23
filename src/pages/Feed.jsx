@@ -1,8 +1,63 @@
 import React, { useState, useEffect } from 'react';
 import { api, supabase } from '@/api/supabaseClient';
 import LocketFeed from '@/components/LocketFeed';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useToast, Toast } from '@/components/Toast';
+
+const CARD_H = '75vh';
+const CARD_TOP = 'calc(50% - 37.5vh - 32px)';
+
+function FeedSkeleton() {
+  return (
+    <div className="absolute inset-0 overflow-hidden pointer-events-none">
+      {/* Peeking ghost card below — communicates the stack */}
+      <div
+        className="absolute left-4 right-4 rounded-2xl bg-muted/40 animate-pulse"
+        style={{ height: CARD_H, top: CARD_TOP, transform: 'translateY(12px) scale(0.97)', zIndex: 5 }}
+      />
+
+      {/* Main skeleton card */}
+      <div
+        className="absolute left-4 right-4 rounded-2xl overflow-hidden bg-muted animate-pulse"
+        style={{ height: CARD_H, top: CARD_TOP, zIndex: 10 }}
+      >
+        {/* Simulated photo gradient */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/20 pointer-events-none" />
+
+        {/* Top chrome — avatar + name/type */}
+        <div className="absolute top-4 left-4 flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-full bg-white/20 flex-shrink-0" />
+          <div className="space-y-1.5">
+            <div className="h-3 w-24 bg-white/20 rounded-full" />
+            <div className="h-2.5 w-16 bg-white/10 rounded-full" />
+          </div>
+        </div>
+
+        {/* Bottom — caption lines + action circles */}
+        <div className="absolute bottom-4 left-4 right-4">
+          <div className="space-y-2 mb-3">
+            <div className="h-3 w-3/4 bg-white/20 rounded-full" />
+            <div className="h-2.5 w-1/2 bg-white/10 rounded-full" />
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-10 h-10 rounded-full bg-black/30" />
+            <div className="w-10 h-10 rounded-full bg-black/30" />
+          </div>
+        </div>
+      </div>
+
+      {/* Swipe hint dots */}
+      <div
+        className="absolute left-0 right-0 flex items-center justify-center gap-1"
+        style={{ bottom: 'calc(50% - 37.5vh - 20px)' }}
+      >
+        <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/30" />
+        <div className="w-4 h-1.5 rounded-full bg-muted-foreground/50" />
+        <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/30" />
+      </div>
+    </div>
+  );
+}
 
 export default function Feed({ currentUser, profile }) {
   const { message: feedToastMessage, show: showFeedToast } = useToast();
@@ -96,34 +151,49 @@ export default function Feed({ currentUser, profile }) {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="w-8 h-8 border-4 border-border border-t-primary rounded-full animate-spin" />
-      </div>
-    );
-  }
-
   return (
     <div className="h-full relative">
       <Toast message={feedToastMessage} />
-      <LocketFeed
-        posts={posts}
-        currentUserId={currentUser.id}
-        profiles={profiles}
-        allPostsByUser={allPostsByUser}
-        commentCounts={commentCounts}
-        onOpenChat={(post) => {
-          // Find the partnership for this post author
-          const partnership = partnerships.find(p =>
-            p.user_a_id === post.user_id || p.user_b_id === post.user_id
-          );
-          setChatTarget({ post, partnership });
-        }}
-        onRefresh={loadFeed}
-        emptyMessage="Your feed is empty"
-        emptyEmoji="🌱"
-      />
+
+      <AnimatePresence mode="wait" initial={false}>
+        {loading ? (
+          <motion.div
+            key="skeleton"
+            className="absolute inset-0"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+          >
+            <FeedSkeleton />
+          </motion.div>
+        ) : (
+          <motion.div
+            key="feed"
+            className="absolute inset-0"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.22 }}
+          >
+            <LocketFeed
+              posts={posts}
+              currentUserId={currentUser.id}
+              profiles={profiles}
+              allPostsByUser={allPostsByUser}
+              commentCounts={commentCounts}
+              onOpenChat={(post) => {
+                const partnership = partnerships.find(p =>
+                  p.user_a_id === post.user_id || p.user_b_id === post.user_id
+                );
+                setChatTarget({ post, partnership });
+              }}
+              onRefresh={loadFeed}
+              emptyMessage="Your feed is empty"
+              emptyEmoji="🌱"
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Chat drawer */}
       {chatTarget && (

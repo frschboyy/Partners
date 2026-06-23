@@ -130,7 +130,7 @@ export default function Settings({ currentUser, profile, onProfileUpdate, curren
       });
       onProfileUpdate?.(updated);
     } catch (err) {
-      showToast('Photo upload failed — please try again');
+      showToast(err?.userMessage ?? 'Photo upload failed — please try again');
     }
   }
 

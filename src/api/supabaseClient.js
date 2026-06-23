@@ -5,23 +5,53 @@ export const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
+function isTransientError(err) {
+  const status = err?.status ?? err?.statusCode ?? 0;
+  if (status === 408 || status === 429 || status >= 500) return true;
+  const msg = (err?.message ?? '').toLowerCase();
+  return msg.includes('network') || msg.includes('timeout') || msg.includes('fetch') || msg.includes('aborted');
+}
+
+// Safe for idempotent (read-only) operations only — do NOT wrap writes.
+export async function withRetry(fn, { maxAttempts = 3, baseDelayMs = 600 } = {}) {
+  let lastError;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      if (attempt < maxAttempts - 1 && isTransientError(err)) {
+        await new Promise(r => setTimeout(r, baseDelayMs * 2 ** attempt));
+      } else {
+        break;
+      }
+    }
+  }
+  throw lastError;
+}
+
 // Drop-in helpers to match the base44 entity API shape used throughout the app
 export function entityClient(tableName) {
   return {
     async list(orderBy = 'created_at', limit = 50) {
       const col = orderBy.startsWith('-') ? orderBy.slice(1) : orderBy;
       const asc = !orderBy.startsWith('-');
-      const { data } = await supabase.from(tableName).select('*').order(col, { ascending: asc }).limit(limit);
-      return data || [];
+      return withRetry(async () => {
+        const { data, error } = await supabase.from(tableName).select('*').order(col, { ascending: asc }).limit(limit);
+        if (error) throw error;
+        return data || [];
+      });
     },
     async filter(filters, orderBy = 'created_at', limit = 50) {
       const col = orderBy.startsWith('-') ? orderBy.slice(1) : orderBy;
       const asc = !orderBy.startsWith('-');
-      let q = supabase.from(tableName).select('*');
-      Object.entries(filters).forEach(([k, v]) => { q = q.eq(k, v); });
-      const { data, error } = await q.order(col, { ascending: asc }).limit(limit);
-      if (error) throw error;
-      return data || [];
+      return withRetry(async () => {
+        let q = supabase.from(tableName).select('*');
+        Object.entries(filters).forEach(([k, v]) => { q = q.eq(k, v); });
+        const { data, error } = await q.order(col, { ascending: asc }).limit(limit);
+        if (error) throw error;
+        return data || [];
+      });
     },
     async create(payload) {
       const { data, error } = await supabase.from(tableName).insert(payload).select().single();
@@ -137,9 +167,42 @@ export const api = {
   integrations: {
     Core: {
       async UploadFile({ file }) {
+        const MAX_BYTES = 10 * 1024 * 1024; // 10 MB — Supabase free-tier storage limit
+        if (file.size > MAX_BYTES) {
+          const mb = (file.size / 1024 / 1024).toFixed(1);
+          const err = new Error('FILE_TOO_LARGE');
+          err.userMessage = `File is too large (${mb} MB). Please use an image under 10 MB.`;
+          throw err;
+        }
+
+        if (!navigator.onLine) {
+          const err = new Error('OFFLINE');
+          err.userMessage = "You're offline. Reconnect and try uploading again.";
+          throw err;
+        }
+
         const name = file.name || `upload-${Date.now()}`;
-        const { data, error } = await supabase.storage.from('uploads').upload(`public/${Date.now()}-${name}`, file, { upsert: true });
-        if (error) throw error;
+        let data, uploadError;
+        try {
+          ({ data, error: uploadError } = await supabase.storage
+            .from('uploads')
+            .upload(`public/${Date.now()}-${name}`, file, { upsert: true }));
+        } catch (networkErr) {
+          const err = networkErr instanceof Error ? networkErr : new Error(String(networkErr));
+          err.userMessage = 'Network error during upload — check your connection and try again.';
+          throw err;
+        }
+
+        if (uploadError) {
+          const status = uploadError.statusCode ?? uploadError.status ?? 0;
+          uploadError.userMessage =
+            status === 413 ? 'File is too large for the server. Try a smaller image.' :
+            status >= 500  ? 'Server error — please try again in a moment.' :
+            status === 401 || status === 403 ? 'Upload permission denied. Please sign in again.' :
+            `Upload failed: ${uploadError.message}`;
+          throw uploadError;
+        }
+
         const { data: { publicUrl } } = supabase.storage.from('uploads').getPublicUrl(data.path);
         return { file_url: publicUrl };
       },

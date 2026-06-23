@@ -14,6 +14,7 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
   const [specialAllowances, setSpecialAllowances] = useState(partnership.special_allowances || []);
   const [newAllowance, setNewAllowance] = useState({ name: '', for_user: 'both', date_start: '', date_end: '' });
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [showRenegotiateConfirm, setShowRenegotiateConfirm] = useState(false);
 
   // Live partnership state — kept fresh via on-mount fetch + real-time subscription
@@ -95,104 +96,126 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
 
   async function handleSubmitProposal() {
     setSaving(true);
+    setSaveError('');
+    try {
+      // Atomically claim the proposal slot — only succeeds if no one else has proposed
+      const { data: claimed, error } = await supabase.rpc('claim_proposal_slot', {
+        p_partnership_id: partnership.id,
+        p_proposer_id:    currentUserId,
+      });
 
-    // Atomically claim the proposal slot — only succeeds if no one else has proposed
-    const { data: claimed, error } = await supabase.rpc('claim_proposal_slot', {
-      p_partnership_id: partnership.id,
-      p_proposer_id:    currentUserId,
-    });
+      if (error) throw error;
 
-    if (error || !claimed) {
-      const { data: fresh } = await supabase
-        .from('partnerships')
-        .select('*')
-        .eq('id', partnership.id)
-        .single();
-      if (fresh) setLivePartnership(fresh);
+      if (!claimed) {
+        // Partner submitted first — refresh their terms so the UI shows them
+        const { data: fresh } = await supabase
+          .from('partnerships')
+          .select('*')
+          .eq('id', partnership.id)
+          .single();
+        if (fresh) setLivePartnership(fresh);
+        setSaveError('Your partner already submitted a proposal. Review their terms above.');
+        setSaving(false);
+        return;
+      }
+
+      // Slot is ours — write the full proposal terms
+      await api.entities.Partnership.update(partnership.id, {
+        shared_goals:       goals,
+        penalty_amount:     Number(penalty) || 0,
+        user_a_rules:       userARules,
+        user_b_rules:       userBRules,
+        special_allowances: specialAllowances,
+        user_a_agreed:      false,
+        user_b_agreed:      false,
+      });
+
+      const partnerId = isUserA ? partnership.user_b_id : partnership.user_a_id;
+      await supabase.from('notifications').insert({
+        user_id: partnerId,
+        type: 'partnership_agreed',
+        title: `${myName} sent a proposal`,
+        body: 'Review the terms and accept or counter-propose.',
+        from_user_id: currentUserId,
+        from_user_name: myName,
+        action_id: partnership.id,
+        action_type: 'partnership_proposal',
+        read: false,
+      });
+
+      onProposalSent?.();
+      onClose();
+    } catch (err) {
+      setSaveError(err?.message?.includes('duplicate') || err?.code === '23505'
+        ? 'A proposal conflict occurred. Please close this modal and try again.'
+        : 'Failed to send proposal — check your connection and try again.');
+    } finally {
       setSaving(false);
-      return;
     }
-
-    // Slot is ours — write the full proposal terms
-    await api.entities.Partnership.update(partnership.id, {
-      shared_goals:       goals,
-      penalty_amount:     Number(penalty) || 0,
-      user_a_rules:       userARules,
-      user_b_rules:       userBRules,
-      special_allowances: specialAllowances,
-      user_a_agreed:      false,
-      user_b_agreed:      false,
-    });
-
-    const partnerId = isUserA ? partnership.user_b_id : partnership.user_a_id;
-    await supabase.from('notifications').insert({
-      user_id: partnerId,
-      type: 'partnership_agreed',
-      title: `${myName} sent a proposal`,
-      body: 'Review the terms and accept or counter-propose.',
-      from_user_id: currentUserId,
-      from_user_name: myName,
-      action_id: partnership.id,
-      action_type: 'partnership_proposal',
-      read: false,
-    });
-    setSaving(false);
-    onProposalSent?.();
-    onClose();
   }
 
   async function handleAccept() {
     setSaving(true);
-    // Mark both sides agreed and activate
-    await api.entities.Partnership.update(partnership.id, {
-      user_a_agreed: true,
-      user_b_agreed: true,
-      status: 'active',
-      agreed_at: new Date().toISOString(),
-    });
-    await supabase.from('notifications').insert([
-      {
-        user_id: partnership.user_a_id,
-        type: 'partnership_agreed',
-        title: '🎉 Partnership locked in!',
-        body: `You and ${partnership.user_b_name} are now accountability partners.`,
-        read: false,
-      },
-      {
-        user_id: partnership.user_b_id,
-        type: 'partnership_agreed',
-        title: '🎉 Partnership locked in!',
-        body: `You and ${partnership.user_a_name} are now accountability partners.`,
-        read: false,
-      },
-    ]);
-    setSaving(false);
-    onAgreed?.();
-    onClose();
+    setSaveError('');
+    try {
+      await api.entities.Partnership.update(partnership.id, {
+        user_a_agreed: true,
+        user_b_agreed: true,
+        status: 'active',
+        agreed_at: new Date().toISOString(),
+      });
+      await supabase.from('notifications').insert([
+        {
+          user_id: partnership.user_a_id,
+          type: 'partnership_agreed',
+          title: '🎉 Partnership locked in!',
+          body: `You and ${partnership.user_b_name} are now accountability partners.`,
+          read: false,
+        },
+        {
+          user_id: partnership.user_b_id,
+          type: 'partnership_agreed',
+          title: '🎉 Partnership locked in!',
+          body: `You and ${partnership.user_a_name} are now accountability partners.`,
+          read: false,
+        },
+      ]);
+      onAgreed?.();
+      onClose();
+    } catch (err) {
+      setSaveError('Failed to accept the agreement — please try again.');
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleRenegotiate() {
     setSaving(true);
-    // Reset agreed flags and proposer — opens negotiation again
-    await api.entities.Partnership.update(partnership.id, {
-      user_a_agreed: false,
-      user_b_agreed: false,
-      last_proposer_id: null,
-      status: 'negotiating',
-    });
-    const partnerId = isUserA ? partnership.user_b_id : partnership.user_a_id;
-    await supabase.from('notifications').insert({
-      user_id: partnerId,
-      type: 'partnership_proposal',
-      title: `${myName} wants to renegotiate`,
-      body: 'Your partnership terms have been re-opened for negotiation.',
-      from_user_id: currentUserId,
-      from_user_name: myName,
-      read: false,
-    });
-    setSaving(false);
-    setShowRenegotiateConfirm(false);
-    onClose();
+    setSaveError('');
+    try {
+      await api.entities.Partnership.update(partnership.id, {
+        user_a_agreed: false,
+        user_b_agreed: false,
+        last_proposer_id: null,
+        status: 'negotiating',
+      });
+      const partnerId = isUserA ? partnership.user_b_id : partnership.user_a_id;
+      await supabase.from('notifications').insert({
+        user_id: partnerId,
+        type: 'partnership_proposal',
+        title: `${myName} wants to renegotiate`,
+        body: 'Your partnership terms have been re-opened for negotiation.',
+        from_user_id: currentUserId,
+        from_user_name: myName,
+        read: false,
+      });
+      setShowRenegotiateConfirm(false);
+      onClose();
+    } catch (err) {
+      setSaveError('Failed to re-open negotiation — please try again.');
+    } finally {
+      setSaving(false);
+    }
   }
 
   // ——— Settled / locked view ———
@@ -312,6 +335,9 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
                       This will re-open negotiation. Both you and {partnerName} will need to accept the new terms before it's locked again.
                     </p>
                   </div>
+                  {saveError && (
+                    <p className="text-xs text-destructive text-center">{saveError}</p>
+                  )}
                   <div className="flex gap-3">
                     <button onClick={() => setShowRenegotiateConfirm(false)}
                       className="flex-1 py-2.5 rounded-xl border border-border font-semibold text-sm">
@@ -470,6 +496,9 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
 
           {/* Footer actions */}
           <div className="p-5 border-t border-border flex-shrink-0 space-y-3">
+            {saveError && (
+              <p className="text-xs text-destructive text-center px-1">{saveError}</p>
+            )}
             {canAccept ? (
               <>
                 <motion.button

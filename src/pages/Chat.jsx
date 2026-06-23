@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useRef, lazy, Suspense, useCallback } from 'react';
 import { api, supabase } from '@/api/supabaseClient';
 import { motion, AnimatePresence } from 'framer-motion';
 import Avatar from '@/components/Avatar';
 const ChatPicker = lazy(() => import('@/components/ChatPicker'));
 import { Send, ArrowLeft, Pencil, Trash2, Check, X as XIcon, Smile } from 'lucide-react';
+import { haptic } from '@/lib/haptic';
 
 function formatTime(dateStr) {
   if (!dateStr) return '';
@@ -36,6 +37,8 @@ export default function Chat({ currentUser, profile }) {
   const typingChannelsRef = useRef({});
   const typingTimersRef = useRef({});
   const typingThrottleRef = useRef(null);
+  const longPressTimer = useRef(null);
+  const longPressActivated = useRef(false);
 
   // Keep a mutable ref in sync so the global ChatMessage subscription (which only
   // mounts once on [currentUser]) can read the current chat without being re-subscribed.
@@ -252,6 +255,25 @@ export default function Chat({ currentUser, profile }) {
     await api.entities.ChatMessage.update(msg.id, { is_deleted: true });
   }
 
+  const handleMsgPointerDown = useCallback((msgId, canAct) => {
+    if (!canAct) return;
+    longPressActivated.current = false;
+    longPressTimer.current = setTimeout(() => {
+      longPressActivated.current = true;
+      setActiveMessageId(prev => prev === msgId ? null : msgId);
+      haptic([30, 15, 50]);
+    }, 480);
+  }, []);
+
+  const handleMsgPointerUp = useCallback(() => {
+    clearTimeout(longPressTimer.current);
+  }, []);
+
+  const handleMsgClick = useCallback((msgId, canAct) => {
+    if (longPressActivated.current) { longPressActivated.current = false; return; }
+    if (canAct) setActiveMessageId(prev => prev === msgId ? null : msgId);
+  }, []);
+
   useEffect(() => {
     if (!showPicker) return;
     function onMouseDown(e) {
@@ -277,6 +299,7 @@ export default function Chat({ currentUser, profile }) {
 
   async function sendMessage() {
     if (!text.trim() || !selectedPartnership) return;
+    haptic([10]);
     setSending(true);
     const content = text.trim();
     setText('');
@@ -336,8 +359,25 @@ export default function Chat({ currentUser, profile }) {
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {loadingMessages ? (
-            <div className="flex items-center justify-center h-full">
-              <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+            <div className="space-y-3 animate-pulse pt-2">
+              {[
+                { isMe: false, w: '52%' },
+                { isMe: true,  w: '38%' },
+                { isMe: false, w: '64%' },
+                { isMe: true,  w: '44%' },
+                { isMe: false, w: '56%' },
+              ].map((b, i) => (
+                <div key={i} className={`flex ${b.isMe ? 'justify-end' : 'justify-start'}`}>
+                  {!b.isMe && <div className="w-7 h-7 rounded-full bg-muted flex-shrink-0 mr-2 mt-1" />}
+                  <div
+                    className={`h-10 rounded-2xl ${b.isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
+                    style={{
+                      width: b.w,
+                      background: b.isMe ? 'hsl(var(--theme-accent) / 0.25)' : 'hsl(var(--muted))',
+                    }}
+                  />
+                </div>
+              ))}
             </div>
           ) : messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full gap-3">
@@ -363,8 +403,11 @@ export default function Chat({ currentUser, profile }) {
                 {(msg.message_type === 'gif' || msg.message_type === 'sticker') && !msg.is_deleted ? (
                   <div
                     className={`max-w-[220px] rounded-2xl overflow-hidden ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
-                    style={{ cursor: canDelete ? 'pointer' : 'default' }}
-                    onClick={() => { if (canDelete) setActiveMessageId(p => p === msg.id ? null : msg.id); }}
+                    style={{ cursor: canDelete ? 'pointer' : 'default', userSelect: 'none' }}
+                    onPointerDown={() => handleMsgPointerDown(msg.id, canDelete)}
+                    onPointerUp={handleMsgPointerUp}
+                    onPointerCancel={handleMsgPointerUp}
+                    onClick={() => handleMsgClick(msg.id, canDelete)}
                   >
                     <img
                       src={msg.content}
@@ -381,10 +424,12 @@ export default function Chat({ currentUser, profile }) {
                       background: isMe ? 'hsl(var(--theme-accent))' : 'hsl(var(--secondary))',
                       color: isMe ? 'hsl(var(--theme-accent-fg))' : 'hsl(var(--foreground))',
                       cursor: (canEdit || canDelete) ? 'pointer' : 'default',
+                      userSelect: 'none',
                     }}
-                    onClick={() => {
-                      if (canEdit || canDelete) setActiveMessageId(p => p === msg.id ? null : msg.id);
-                    }}
+                    onPointerDown={() => handleMsgPointerDown(msg.id, canEdit || canDelete)}
+                    onPointerUp={handleMsgPointerUp}
+                    onPointerCancel={handleMsgPointerUp}
+                    onClick={() => handleMsgClick(msg.id, canEdit || canDelete)}
                   >
                     {msg.is_deleted ? (
                       <p className="text-xs italic opacity-50">Message deleted</p>

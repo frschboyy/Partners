@@ -21,8 +21,8 @@ export default function SelfSlipSection({ currentUser, profile, rules, activePar
       const compressed = await compressImage(file);
       const { file_url } = await api.integrations.Core.UploadFile({ file: compressed });
       setPhotoUrl(file_url);
-    } catch {
-      setError('Photo upload failed. Try again.');
+    } catch (err) {
+      setError(err?.userMessage ?? 'Photo upload failed. Try again.');
     }
     setUploading(false);
     e.target.value = '';

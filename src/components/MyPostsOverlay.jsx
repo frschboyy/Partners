@@ -116,8 +116,8 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
       } else {
         setEditPhotoUrls(prev => [...prev, file_url]);
       }
-    } catch (_) {
-      showToast('Photo upload failed');
+    } catch (err) {
+      showToast(err?.userMessage ?? 'Photo upload failed — please try again.');
     }
     editingIndexRef.current = -1;
     if (fileInputRef.current) fileInputRef.current.value = '';

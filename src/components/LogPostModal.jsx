@@ -129,7 +129,7 @@ export default function LogPostModal({ currentUser, profile, rules = [], partner
       const newUrls = uploads.map(r => r.file_url).filter(Boolean);
       setPhotoUrls(prev => [...prev, ...newUrls]);
     } catch (err) {
-      setPhotoError('Upload failed. Please try again.');
+      setPhotoError(err?.userMessage ?? 'Upload failed. Please try again.');
     }
     setUploading(false);
     // reset input so same file can be re-selected

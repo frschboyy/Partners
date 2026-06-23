@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { MessageCircle, ChevronLeft, ChevronRight, Smile, Pencil, Trash2, X, Plus } from 'lucide-react';
 import { motion, AnimatePresence, useMotionValue, animate } from 'framer-motion';
 import { api } from '@/api/supabaseClient';
@@ -8,6 +8,7 @@ import { useToast, Toast } from '@/components/Toast';
 import CommentsSheet from '@/components/CommentsSheet';
 import { EMOJI_REACTIONS, POST_TYPE_LABELS, POST_TYPE_EMOJI } from '@/lib/constants';
 import { usePostReactions } from '@/lib/usePostReactions';
+import { haptic } from '@/lib/haptic';
 
 const DRAG_IMG_THRESHOLD = 50;
 const cardW = () => window.innerWidth - 32;
@@ -50,6 +51,25 @@ export default function FeedPost({
   const authorProfile = profiles[post.user_id];
 
   const { reactions, myReaction, reactionGroups, toggleReaction: _toggleReaction } = usePostReactions(post, currentUserId);
+  const [burstParticles, setBurstParticles] = useState([]);
+
+  const fireParticles = useCallback((emoji) => {
+    const count = 7;
+    const particles = Array.from({ length: count }, (_, i) => {
+      // Fan upward: spread from -140° to -40° (upward semicircle with sides)
+      const spreadDeg = -140 + (i / (count - 1)) * 100 + (Math.random() - 0.5) * 18;
+      const angle = spreadDeg * (Math.PI / 180);
+      const dist = 32 + Math.random() * 24;
+      return {
+        id: `${Date.now()}-${i}`,
+        emoji,
+        dx: Math.cos(angle) * dist,
+        dy: Math.sin(angle) * dist,
+      };
+    });
+    setBurstParticles(particles);
+    setTimeout(() => setBurstParticles([]), 520);
+  }, []);
 
   // ─── Carousel ────────────────────────────────────────────────────────────────
 
@@ -87,7 +107,12 @@ export default function FeedPost({
   // ─── Reactions ───────────────────────────────────────────────────────────────
 
   async function toggleReaction(emoji) {
+    const isAdding = !myReaction || myReaction.emoji !== emoji;
     setShowReactions(false);
+    if (isAdding) {
+      haptic([8, 4, 12]);
+      fireParticles(emoji);
+    }
     await _toggleReaction(emoji);
   }
 
@@ -121,8 +146,8 @@ export default function FeedPost({
       } else {
         setEditPhotoUrls(prev => [...prev, file_url]);
       }
-    } catch (_) {
-      showToast('Photo upload failed');
+    } catch (err) {
+      showToast(err?.userMessage ?? 'Photo upload failed — please try again.');
     }
     editingIndexRef.current = -1;
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -282,18 +307,35 @@ export default function FeedPost({
           <p className="text-red-300 text-xs mb-2 font-medium">Broke: {post.rule_title}</p>
         )}
 
-        {Object.keys(reactionGroups).length > 0 && (
-          <div className="flex gap-1.5 mb-2 flex-wrap">
-            {Object.entries(reactionGroups).map(([emoji, count]) => (
-              <motion.button
-                key={emoji}
-                whileTap={{ scale: 0.8 }}
-                onClick={e => { e.stopPropagation(); toggleReaction(emoji); }}
-                className={`px-2 py-0.5 rounded-full text-xs font-semibold bg-black/50 text-white border ${myReaction?.emoji === emoji ? 'border-white/60' : 'border-transparent'}`}
-              >{emoji} {count}</motion.button>
+        <div className="relative">
+          {Object.keys(reactionGroups).length > 0 && (
+            <div className="flex gap-1.5 mb-2 flex-wrap">
+              {Object.entries(reactionGroups).map(([emoji, count]) => (
+                <motion.button
+                  key={emoji}
+                  whileTap={{ scale: 0.8 }}
+                  onClick={e => { e.stopPropagation(); toggleReaction(emoji); }}
+                  className={`px-2 py-0.5 rounded-full text-xs font-semibold bg-black/50 text-white border ${myReaction?.emoji === emoji ? 'border-white/60 animate-reaction-pop' : 'border-transparent'}`}
+                >{emoji} {count}</motion.button>
+              ))}
+            </div>
+          )}
+          <AnimatePresence>
+            {burstParticles.map(p => (
+              <motion.span
+                key={p.id}
+                initial={{ x: 0, y: 0, scale: 1.1, opacity: 1 }}
+                animate={{ x: p.dx, y: p.dy, scale: 0, opacity: 0 }}
+                exit={{}}
+                transition={{ duration: 0.48, ease: 'easeOut' }}
+                className="absolute left-4 bottom-6 pointer-events-none select-none text-base"
+                style={{ zIndex: 20 }}
+              >
+                {p.emoji}
+              </motion.span>
             ))}
-          </div>
-        )}
+          </AnimatePresence>
+        </div>
 
         <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
           <motion.button whileTap={{ scale: 0.85 }} onClick={() => setShowReactions(s => !s)} className="p-2.5 rounded-full bg-black/50 text-white">
