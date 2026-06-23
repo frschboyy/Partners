@@ -19,84 +19,88 @@ export default function Feed({ currentUser, profile }) {
 
   async function loadFeed() {
     setLoading(true);
-    const [allPartnerships, allProfiles] = await Promise.all([
-      api.entities.Partnership.list(),
-      api.entities.UserProfile.list(),
-    ]);
+    try {
+      const [allPartnerships, allProfiles] = await Promise.all([
+        api.entities.Partnership.list(),
+        api.entities.UserProfile.list(),
+      ]);
 
-    const myPartnerships = allPartnerships.filter(
-      p => (p.user_a_id === currentUser.id || p.user_b_id === currentUser.id) && p.status === 'active'
-    );
-    setPartnerships(myPartnerships);
+      const myPartnerships = allPartnerships.filter(
+        p => (p.user_a_id === currentUser.id || p.user_b_id === currentUser.id) && p.status === 'active'
+      );
+      setPartnerships(myPartnerships);
 
-    const partnerIds = myPartnerships.map(p =>
-      p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id
-    );
-    const allowedUserIds = [currentUser.id, ...partnerIds];
+      const partnerIds = myPartnerships.map(p =>
+        p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id
+      );
+      const allowedUserIds = [currentUser.id, ...partnerIds];
 
-    const profileMap = {};
-    allProfiles.forEach(pr => { profileMap[pr.user_id] = pr; });
-    if (profile) profileMap[currentUser.id] = profile;
-    setProfiles(profileMap);
+      const profileMap = {};
+      allProfiles.forEach(pr => { profileMap[pr.user_id] = pr; });
+      if (profile) profileMap[currentUser.id] = profile;
+      setProfiles(profileMap);
 
-    // Feed: last 7 days, with a 20-post floor so sparse partnerships aren't empty
-    const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      // Feed: last 7 days, with a 20-post floor so sparse partnerships aren't empty
+      const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-    const { data: recentPosts } = await supabase
-      .from('posts')
-      .select('*')
-      .in('user_id', allowedUserIds)
-      .gte('created_at', oneWeekAgo)
-      .order('created_at', { ascending: false })
-      .limit(100);
-
-    let feedPosts = recentPosts || [];
-
-    if (feedPosts.length < 20) {
-      const { data: olderPosts } = await supabase
+      const { data: recentPosts, error: recentErr } = await supabase
         .from('posts')
         .select('*')
         .in('user_id', allowedUserIds)
-        .lt('created_at', oneWeekAgo)
+        .gte('created_at', oneWeekAgo)
         .order('created_at', { ascending: false })
-        .limit(20 - feedPosts.length);
-      feedPosts = [...feedPosts, ...(olderPosts || [])];
-    }
+        .limit(100);
+      if (recentErr) throw recentErr;
 
-    // Grid view needs all posts per user (not just the feed window)
-    const { data: allUserPosts } = await supabase
-      .from('posts')
-      .select('*')
-      .in('user_id', allowedUserIds)
-      .order('created_at', { ascending: false })
-      .limit(200);
+      let feedPosts = recentPosts || [];
 
-    const byUser = {};
-    (allUserPosts || []).forEach(p => {
-      if (!byUser[p.user_id]) byUser[p.user_id] = [];
-      byUser[p.user_id].push(p);
-    });
-    setAllPostsByUser(byUser);
-
-    setPosts(feedPosts);
-
-    // Fetch top-level comment counts for all feed posts in one query
-    const postIds = feedPosts.map(p => p.id);
-    const counts = {};
-    if (postIds.length > 0) {
-      const { data: commentRows } = await supabase
-        .from('chat_messages')
-        .select('post_id')
-        .in('post_id', postIds)
-        .is('reply_to_id', null);
-      if (commentRows) {
-        commentRows.forEach(r => {
-          counts[r.post_id] = (counts[r.post_id] || 0) + 1;
-        });
+      if (feedPosts.length < 20) {
+        const { data: olderPosts } = await supabase
+          .from('posts')
+          .select('*')
+          .in('user_id', allowedUserIds)
+          .lt('created_at', oneWeekAgo)
+          .order('created_at', { ascending: false })
+          .limit(20 - feedPosts.length);
+        feedPosts = [...feedPosts, ...(olderPosts || [])];
       }
-    }
-    setCommentCounts(counts);
 
+      // Grid view needs all posts per user (not just the feed window)
+      const { data: allUserPosts } = await supabase
+        .from('posts')
+        .select('*')
+        .in('user_id', allowedUserIds)
+        .order('created_at', { ascending: false })
+        .limit(200);
+
+      const byUser = {};
+      (allUserPosts || []).forEach(p => {
+        if (!byUser[p.user_id]) byUser[p.user_id] = [];
+        byUser[p.user_id].push(p);
+      });
+      setAllPostsByUser(byUser);
+
+      setPosts(feedPosts);
+
+      // Fetch top-level comment counts for all feed posts in one query
+      const postIds = feedPosts.map(p => p.id);
+      const counts = {};
+      if (postIds.length > 0) {
+        const { data: commentRows } = await supabase
+          .from('chat_messages')
+          .select('post_id')
+          .in('post_id', postIds)
+          .is('reply_to_id', null);
+        if (commentRows) {
+          commentRows.forEach(r => {
+            counts[r.post_id] = (counts[r.post_id] || 0) + 1;
+          });
+        }
+      }
+      setCommentCounts(counts);
+    } catch (err) {
+      console.error('Failed to load feed:', err?.message || err);
+    }
     setLoading(false);
   }
 

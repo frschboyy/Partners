@@ -29,10 +29,10 @@ import { AnimatePresence } from 'framer-motion';
 function useBlockBrowserBack() {
   React.useEffect(() => {
     // Push a dummy state so the user always has somewhere to "go back" to within the app
-    window.history.pushState({ bondify: true }, '');
+    window.history.pushState({ Partnerz: true }, '');
     const handler = (e) => {
       // Re-push so the back button never exits the SPA while logged in
-      window.history.pushState({ bondify: true }, '');
+      window.history.pushState({ Partnerz: true }, '');
     };
     window.addEventListener('popstate', handler);
     return () => window.removeEventListener('popstate', handler);

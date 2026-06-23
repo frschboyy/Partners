@@ -9,4 +9,23 @@ export default defineConfig({
       '@': path.resolve(__dirname, 'src'),
     },
   },
+  build: {
+    chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-query': ['@tanstack/react-query'],
+          'vendor-supabase': ['@supabase/supabase-js'],
+          'vendor-motion': ['framer-motion'],
+          'vendor-ui': [
+            'lucide-react',
+            'clsx',
+            'tailwind-merge',
+            'class-variance-authority',
+          ],
+        },
+      },
+    },
+  },
 });

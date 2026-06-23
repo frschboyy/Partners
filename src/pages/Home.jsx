@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Compass, Flame, Star, ChevronDown, UserX, Eye, AlertTriangle } from 'lucide-react';
 import { useToast, Toast } from '@/components/Toast';
 import PartnershipFinancials from '@/components/PartnershipFinancials';
@@ -53,45 +53,58 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
 
   async function loadAll() {
     setLoading(true);
-    const [myRules, myPartnerships, declList] = await Promise.all([
-      api.entities.Rule.filter({ user_id: currentUser.id }),
-      api.entities.Partnership.list(),
-      api.entities.SummertidesDeclaration.filter({ user_id: currentUser.id, year: today.getFullYear() }),
-    ]);
+    try {
+      const [myRules, myPartnerships, declList] = await Promise.all([
+        api.entities.Rule.filter({ user_id: currentUser.id }),
+        api.entities.Partnership.list(),
+        api.entities.SummertidesDeclaration.filter({ user_id: currentUser.id, year: today.getFullYear() }),
+      ]);
 
-    setRules(myRules.filter(r => r.active));
-    setSummertidesDecl(declList[0] || null);
+      setRules(myRules.filter(r => r.active));
+      setSummertidesDecl(declList[0] || null);
 
-    const myParties = myPartnerships.filter(p =>
-      (p.user_a_id === currentUser.id || p.user_b_id === currentUser.id) &&
-      p.status !== 'dissolved'
-    );
-    setPartnerships(myParties);
+      const myParties = myPartnerships.filter(p =>
+        (p.user_a_id === currentUser.id || p.user_b_id === currentUser.id) &&
+        p.status !== 'dissolved'
+      );
+      setPartnerships(myParties);
 
-    // Load partner profiles
-    const partnerIds = myParties.map(p => p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id);
-    if (partnerIds.length > 0) {
-      const allProfiles = await api.entities.UserProfile.list();
-      const byUserId = {};
-      allProfiles.forEach(pr => { byUserId[pr.user_id] = pr; });
-      setPartnerProfiles(byUserId);
+      const partnerIds = myParties.map(p => p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id);
+      if (partnerIds.length > 0) {
+        const allProfiles = await api.entities.UserProfile.list();
+        const byUserId = {};
+        allProfiles.forEach(pr => { byUserId[pr.user_id] = pr; });
+        setPartnerProfiles(byUserId);
+      }
+    } catch (err) {
+      console.error('Failed to load dashboard:', err?.message || err);
+      showHomeToast('Failed to load data — please refresh');
     }
     setLoading(false);
   }
 
   async function loadMyPosts() {
-    const posts = await api.entities.Post.filter({ user_id: currentUser.id }, '-created_at', 50);
-    setMyPosts(posts);
+    try {
+      const posts = await api.entities.Post.filter({ user_id: currentUser.id }, '-created_at', 50);
+      setMyPosts(posts);
+    } catch (err) {
+      console.error('Failed to load posts:', err?.message || err);
+    }
   }
 
   async function confirmRemove() {
     if (!removePartner) return;
     setRemoving(true);
     const name = removePartner.partnerName;
-    await handleRemovePartner(removePartner.partnership);
+    try {
+      await handleRemovePartner(removePartner.partnership);
+      setRemovePartner(null);
+      setToast(`${name} has been removed.`);
+    } catch (err) {
+      console.error('Failed to remove partner:', err?.message || err);
+      setToast('Failed to remove partner — please try again');
+    }
     setRemoving(false);
-    setRemovePartner(null);
-    setToast(`${name} has been removed.`);
   }
 
   async function handleRemovePartner(partnership) {
@@ -525,33 +538,38 @@ function WitnessedSlipModal({ currentUser, profile, partnerName, partnerId, part
   async function submit() {
     if (!selectedRuleId) return;
     setSaving(true);
-    const rule = rules.find(r => r.id === selectedRuleId);
-    await api.entities.Slip.create({
-      user_id: partnerId,
-      reporter_id: currentUser.id,
-      partnership_id: partnership.id,
-      rule_id: selectedRuleId,
-      rule_title: rule?.title || '',
-      penalty_amount: partnership.penalty_amount || 0,
-      slip_type: 'witnessed',
-      status: 'pending',
-      slip_date: new Date().toISOString().split('T')[0],
-      notes,
-    });
-    await supabase.from('notifications').insert({
-      user_id: partnerId,
-      type: 'slip_witnessed',
-      title: `${profile?.display_name || 'Your partner'} reported a slip`,
-      body: `They say you broke: ${rule?.title}. Confirm or dispute?`,
-      from_user_id: currentUser.id,
-      from_user_name: profile?.display_name,
-      action_id: partnership.id,
-      action_type: 'witnessed_slip',
-      read: false,
-    });
+    try {
+      const rule = rules.find(r => r.id === selectedRuleId);
+      await api.entities.Slip.create({
+        user_id: partnerId,
+        reporter_id: currentUser.id,
+        partnership_id: partnership.id,
+        rule_id: selectedRuleId,
+        rule_title: rule?.title || '',
+        penalty_amount: partnership.penalty_amount || 0,
+        slip_type: 'witnessed',
+        status: 'pending',
+        slip_date: new Date().toISOString().split('T')[0],
+        notes,
+      });
+      await supabase.from('notifications').insert({
+        user_id: partnerId,
+        type: 'slip_witnessed',
+        title: `${profile?.display_name || 'Your partner'} reported a slip`,
+        body: `They say you broke: ${rule?.title}. Confirm or dispute?`,
+        from_user_id: currentUser.id,
+        from_user_name: profile?.display_name,
+        action_id: partnership.id,
+        action_type: 'witnessed_slip',
+        read: false,
+      });
+      showToast('Slip reported — your partner will be notified.');
+      setTimeout(onClose, 1500);
+    } catch (err) {
+      console.error('Failed to report slip:', err?.message || err);
+      showToast('Failed to report slip — please try again');
+    }
     setSaving(false);
-    showToast('Slip reported — your partner will be notified.');
-    setTimeout(onClose, 1500);
   }
 
   return (

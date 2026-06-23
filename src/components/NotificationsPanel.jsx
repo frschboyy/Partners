@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api, supabase } from '@/api/supabaseClient';
+import { formatDateTime } from '@/lib/dateUtils';
 import { motion } from 'framer-motion';
 import { X, Bell } from 'lucide-react';
 import { useToast, Toast } from '@/components/Toast';
@@ -25,15 +26,25 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
 
   async function loadAll() {
     setLoading(true);
-    const [notifs, slips] = await Promise.all([
-      api.entities.Notification.filter({ user_id: currentUser.id }, '-created_at', 30),
-      api.entities.Slip.filter({ user_id: currentUser.id, status: 'pending' }),
-    ]);
-    setNotifications(notifs);
-    setPendingSlips(slips);
-    await Promise.all(notifs.filter(n => !n.read).map(n =>
-      api.entities.Notification.update(n.id, { read: true })
-    ));
+    try {
+      const [notifs, slips] = await Promise.all([
+        api.entities.Notification.filter({ user_id: currentUser.id }, '-created_at', 30),
+        api.entities.Slip.filter({ user_id: currentUser.id, status: 'pending' }),
+      ]);
+      setNotifications(notifs);
+      setPendingSlips(slips);
+
+      // Batch-mark all unread notifications as read in a single query
+      const unreadIds = notifs.filter(n => !n.read).map(n => n.id);
+      if (unreadIds.length > 0) {
+        await supabase
+          .from('notifications')
+          .update({ read: true })
+          .in('id', unreadIds);
+      }
+    } catch (err) {
+      console.error('Failed to load notifications:', err?.message || err);
+    }
     setLoading(false);
   }
 
@@ -180,7 +191,7 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
                 <p className="font-semibold text-sm">{n.title}</p>
                 <p className="text-xs text-muted-foreground mt-0.5">{n.body}</p>
                 <p className="text-[10px] text-muted-foreground mt-1">
-                  {new Date(n.created_at).toLocaleString()}
+                  {formatDateTime(n.created_at)}
                 </p>
               </div>
               {!n.read && <div className="w-2 h-2 rounded-full bg-primary mt-1 flex-shrink-0" />}

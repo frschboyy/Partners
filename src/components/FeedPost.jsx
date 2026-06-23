@@ -1,35 +1,14 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { MessageCircle, ChevronLeft, ChevronRight, Smile, Pencil, Trash2, X, Send, Maximize2, Minimize2, Heart, CornerDownRight, Plus } from 'lucide-react';
+import { MessageCircle, ChevronLeft, ChevronRight, Smile, Pencil, Trash2, X, Plus } from 'lucide-react';
 import { motion, AnimatePresence, useMotionValue, animate } from 'framer-motion';
 import { api } from '@/api/supabaseClient';
 import Avatar from '@/components/Avatar';
 import { compressImage } from '@/lib/imageUtils';
 import { useToast, Toast } from '@/components/Toast';
+import CommentsSheet from '@/components/CommentsSheet';
+import { EMOJI_REACTIONS, POST_TYPE_LABELS, POST_TYPE_EMOJI } from '@/lib/constants';
 
-const EMOJI_REACTIONS = ['❤️', '🔥', '💪', '😂', '👀', '🫡'];
 const DRAG_IMG_THRESHOLD = 50;
-
-function postEmoji(p) {
-  return p.post_type === 'meal' ? '🍽️' : p.post_type === 'workout' ? '💪' : p.post_type === 'slip' ? '😔' : '✨';
-}
-
-function timeAgo(dateStr) {
-  if (!dateStr) return '';
-  const diff = (Date.now() - new Date(dateStr).getTime()) / 1000;
-  if (diff < 60) return 'now';
-  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
-  if (diff < 604800) return `${Math.floor(diff / 86400)}d`;
-  return new Date(dateStr).toLocaleDateString();
-}
-
-const POST_TYPE_LABELS = {
-  meal: '🍽️ Meal',
-  workout: '💪 Workout',
-  slip: '😔 Slip',
-  milestone: '🏆 Milestone',
-};
-
 const cardW = () => window.innerWidth - 32;
 
 export default function FeedPost({
@@ -41,7 +20,6 @@ export default function FeedPost({
   onOpenChat,
   onRefresh,
 }) {
-  // All photos for this post — falls back to single photo_url for old records
   const photoUrls = post.photo_urls?.length > 0 ? post.photo_urls : (post.photo_url ? [post.photo_url] : []);
 
   const [focused, setFocused] = useState(false);
@@ -52,34 +30,19 @@ export default function FeedPost({
   const [gridFocusPost, setGridFocusPost] = useState(null);
   const [showComments, setShowComments] = useState(false);
   const [commentsExpanded, setCommentsExpanded] = useState(false);
-  const [commentPostId, setCommentPostId] = useState(null); // null = use post.id
-  const [comments, setComments] = useState([]);
-  const [commentsLoaded, setCommentsLoaded] = useState(false);
-  const [commentText, setCommentText] = useState('');
-  const [loadingComments, setLoadingComments] = useState(false);
-  const [sendingComment, setSendingComment] = useState(false);
-  const [commentMenuId, setCommentMenuId] = useState(null);
-  const [editingCommentId, setEditingCommentId] = useState(null);
-  const [editingCommentText, setEditingCommentText] = useState('');
-  const [replyingTo, setReplyingTo] = useState(null);
+  const [commentPostId, setCommentPostId] = useState(null);
+  const [commentCount, setCommentCount] = useState(initialCommentCount);
   const [editOverlayOpen, setEditOverlayOpen] = useState(false);
   const [editCaption, setEditCaption] = useState(post.caption || '');
   const [editPhotoUrls, setEditPhotoUrls] = useState([]);
   const [editSelectedIndex, setEditSelectedIndex] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [expandedReplies, setExpandedReplies] = useState({});
 
   const { message: toastMessage, show: showToast } = useToast();
-
   const fileInputRef = useRef(null);
-  // >= 0: replace photo at that index; -1: add new photo
   const editingIndexRef = useRef(-1);
-  const commentInputRef = useRef(null);
-  const commentsBottomRef = useRef(null);
-  const commentsScrollRef = useRef(null);
   const imageTransitioning = useRef(false);
-
   const imageX = useMotionValue(0);
 
   const activePost = gridFocusPost || post;
@@ -146,123 +109,16 @@ export default function FeedPost({
     } else {
       updated = [...current, { user_id: currentUserId, emoji, created_at: new Date().toISOString() }];
     }
-    await api.entities.Post.update(post.id, { reactions: updated });
+    try {
+      await api.entities.Post.update(post.id, { reactions: updated });
+    } catch (_) {}
   }, [post, currentUserId, localReactions]);
 
-  // ─── Comments ────────────────────────────────────────────────────────────────
-
-  async function deleteComment(id) {
-    const backup = comments.find(c => c.id === id);
-    setComments(prev => prev.filter(c => c.id !== id));
-    setCommentMenuId(null);
-    if (!id.startsWith('opt_')) {
-      try {
-        await api.entities.ChatMessage.delete(id);
-        showToast('Comment deleted');
-      } catch (_) {
-        if (backup) {
-          setComments(prev => [...prev, backup].sort((a, b) => (a.created_at > b.created_at ? 1 : -1)));
-        }
-      }
-    }
-  }
-
-  async function saveCommentEdit(id) {
-    const text = editingCommentText.trim();
-    if (!text) return;
-    setComments(prev => prev.map(c => c.id === id ? { ...c, content: text } : c));
-    setEditingCommentId(null);
-    setCommentMenuId(null);
-    await api.entities.ChatMessage.update(id, { content: text });
-    showToast('Comment updated');
-  }
-
-  async function toggleCommentLike(commentId) {
-    setComments(prev => prev.map(c => {
-      if (c.id !== commentId) return c;
-      const liked = c.liked_by || [];
-      const hasLiked = liked.includes(currentUserId);
-      return { ...c, liked_by: hasLiked ? liked.filter(id => id !== currentUserId) : [...liked, currentUserId] };
-    }));
-    if (commentId.startsWith('opt_')) return;
-    const comment = comments.find(c => c.id === commentId);
-    if (!comment) return;
-    const liked = comment.liked_by || [];
-    const hasLiked = liked.includes(currentUserId);
-    await api.entities.ChatMessage.update(commentId, { liked_by: hasLiked ? liked.filter(id => id !== currentUserId) : [...liked, currentUserId] });
-  }
-
-  async function openComments(targetPostId = null) {
+  function openComments(targetPostId = null) {
     const id = targetPostId || post.id;
     setCommentPostId(id);
-    setShowComments(true);
     setCommentsExpanded(false);
-    setLoadingComments(true);
-    setComments([]);
-    try {
-      const msgs = await api.entities.ChatMessage.filter({ post_id: id }, 'created_at', 100);
-      const normalized = msgs
-        .map(c => ({ ...c }))
-        .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-      setComments(normalized);
-    } catch (_) {
-      setComments([]);
-    }
-    setCommentsLoaded(true);
-    setLoadingComments(false);
-    setTimeout(() => commentInputRef.current?.focus(), 200);
-  }
-
-  async function sendComment() {
-    if (!commentText.trim() || sendingComment) return;
-    setSendingComment(true);
-    const myProfile = profiles[currentUserId];
-    const text = commentText.trim();
-    const replyId = replyingTo?.id || null;
-    const activePostId = commentPostId || post.id;
-    const optimistic = {
-      id: `opt_${Date.now()}`,
-      post_id: activePostId,
-      sender_id: currentUserId,
-      sender_name: myProfile?.display_name || 'You',
-      content: text,
-      created_at: new Date().toISOString(),
-      created_date: new Date().toISOString(),
-      reply_to_id: replyId,
-      liked_by: [],
-    };
-    setComments(prev => [...prev, optimistic]);
-    setCommentText('');
-    setReplyingTo(null);
-    setTimeout(() => {
-      if (commentsScrollRef.current) {
-        commentsScrollRef.current.scrollTop = commentsScrollRef.current.scrollHeight;
-      }
-    }, 50);
-    try {
-      const msg = await api.entities.ChatMessage.create({
-        post_id: activePostId,
-        partnership_id: null,
-        sender_id: currentUserId,
-        sender_name: myProfile?.display_name || 'You',
-        content: text,
-        message_type: 'text',
-        read_by: [currentUserId],
-        reply_to_id: replyId,
-        liked_by: [],
-      });
-      if (msg) {
-        const normalizedMsg = { ...msg };
-        setComments(prev => prev.map(c => c.id === optimistic.id ? normalizedMsg : c));
-        showToast(replyId ? 'Reply added' : 'Comment added');
-      }
-    } catch (err) {
-      setComments(prev => prev.filter(c => c.id !== optimistic.id));
-      setCommentText(text);
-      console.error('Comment save failed:', err?.message || err);
-      showToast('Failed to save comment');
-    }
-    setSendingComment(false);
+    setShowComments(true);
   }
 
   // ─── Edit overlay ────────────────────────────────────────────────────────────
@@ -279,13 +135,17 @@ export default function FeedPost({
   async function handlePhotoUpload(e) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const compressed = await compressImage(file);
-    const { file_url } = await api.integrations.Core.UploadFile({ file: compressed });
-    const idx = editingIndexRef.current;
-    if (idx >= 0) {
-      setEditPhotoUrls(prev => prev.map((url, i) => i === idx ? file_url : url));
-    } else {
-      setEditPhotoUrls(prev => [...prev, file_url]);
+    try {
+      const compressed = await compressImage(file);
+      const { file_url } = await api.integrations.Core.UploadFile({ file: compressed });
+      const idx = editingIndexRef.current;
+      if (idx >= 0) {
+        setEditPhotoUrls(prev => prev.map((url, i) => i === idx ? file_url : url));
+      } else {
+        setEditPhotoUrls(prev => [...prev, file_url]);
+      }
+    } catch (_) {
+      showToast('Photo upload failed');
     }
     editingIndexRef.current = -1;
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -302,16 +162,21 @@ export default function FeedPost({
       setEditOverlayOpen(false);
       showToast('Post updated');
       onRefresh?.();
-    } catch (_) {}
+    } catch (_) {
+      showToast('Failed to save changes');
+    }
     setSaving(false);
   }
 
   async function handleDelete() {
-    await api.entities.Post.delete(post.id);
-    setConfirmDelete(false);
-    showToast('Post deleted');
-    // Delay refresh so the toast is visible before this card unmounts
-    setTimeout(() => onRefresh?.(), 1400);
+    try {
+      await api.entities.Post.delete(post.id);
+      setConfirmDelete(false);
+      showToast('Post deleted');
+      setTimeout(() => onRefresh?.(), 1400);
+    } catch (_) {
+      showToast('Failed to delete post');
+    }
   }
 
   // ─── Render ──────────────────────────────────────────────────────────────────
@@ -342,7 +207,7 @@ export default function FeedPost({
                   <img src={url} alt="" className="w-full h-full object-cover" loading="eager" decoding="async" />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center" style={{ background: 'linear-gradient(135deg, hsl(var(--theme-accent-muted)), hsl(var(--card)))' }}>
-                    <span className="text-8xl opacity-30">{postEmoji(post)}</span>
+                    <span className="text-8xl opacity-30">{POST_TYPE_EMOJI[post.post_type] || '✨'}</span>
                   </div>
                 )}
               </div>
@@ -353,7 +218,7 @@ export default function FeedPost({
             <img src={photoUrls[0]} alt="post" className="w-full h-full object-cover" loading="eager" decoding="async" fetchPriority="high" />
           ) : (
             <div className="w-full h-full flex items-center justify-center" style={{ background: 'linear-gradient(135deg, hsl(var(--theme-accent-muted)), hsl(var(--card)))' }}>
-              <span className="text-8xl opacity-30">{postEmoji(post)}</span>
+              <span className="text-8xl opacity-30">{POST_TYPE_EMOJI[post.post_type] || '✨'}</span>
             </div>
           )
         )}
@@ -411,7 +276,6 @@ export default function FeedPost({
 
       {/* Bottom content */}
       <div className="absolute bottom-0 left-0 right-0 p-4 z-10">
-        {/* Pagination dots */}
         {photoUrls.length > 1 && (
           <div className="flex items-center justify-center gap-1.5 mb-2 pointer-events-none">
             {photoUrls.map((_, i) => (
@@ -461,26 +325,17 @@ export default function FeedPost({
 
           <motion.button whileTap={{ scale: 0.85 }} onClick={() => openComments()} className="p-2.5 rounded-full bg-black/50 text-white flex items-center gap-1">
             <MessageCircle size={18} />
-            {(() => {
-              const count = commentsLoaded
-                ? comments.filter(c => !c.reply_to_id).length
-                : initialCommentCount;
-              return count > 0 ? <span className="text-xs font-bold">{count}</span> : null;
-            })()}
+            {commentCount > 0 && <span className="text-xs font-bold">{commentCount}</span>}
           </motion.button>
 
-          {focused && (
+          {focused && isMyPost && (
             <>
-              {isMyPost && (
-                <>
-                  <motion.button whileTap={{ scale: 0.85 }} onClick={e => { e.stopPropagation(); openEditOverlay(); }} className="p-2.5 rounded-full bg-black/50 text-white">
-                    <Pencil size={18} />
-                  </motion.button>
-                  <motion.button whileTap={{ scale: 0.85 }} onClick={() => setConfirmDelete(true)} className="p-2.5 rounded-full bg-black/50 text-red-400">
-                    <Trash2 size={18} />
-                  </motion.button>
-                </>
-              )}
+              <motion.button whileTap={{ scale: 0.85 }} onClick={e => { e.stopPropagation(); openEditOverlay(); }} className="p-2.5 rounded-full bg-black/50 text-white">
+                <Pencil size={18} />
+              </motion.button>
+              <motion.button whileTap={{ scale: 0.85 }} onClick={() => setConfirmDelete(true)} className="p-2.5 rounded-full bg-black/50 text-red-400">
+                <Trash2 size={18} />
+              </motion.button>
             </>
           )}
         </div>
@@ -502,7 +357,7 @@ export default function FeedPost({
         </AnimatePresence>
       </div>
 
-      {/* Edit overlay — photo grid + caption */}
+      {/* Edit overlay */}
       <AnimatePresence>
         {editOverlayOpen && (
           <motion.div
@@ -518,7 +373,6 @@ export default function FeedPost({
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{ touchAction: 'pan-y' }}>
-              {/* Photo grid */}
               <div>
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
                   Photos ({editPhotoUrls.length})
@@ -534,7 +388,7 @@ export default function FeedPost({
                       {url ? (
                         <img src={url} alt="" className="w-full h-full object-cover" />
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center text-3xl">{postEmoji(post)}</div>
+                        <div className="w-full h-full flex items-center justify-center text-3xl">{POST_TYPE_EMOJI[post.post_type] || '✨'}</div>
                       )}
                       <AnimatePresence>
                         {editSelectedIndex === i && (
@@ -568,7 +422,6 @@ export default function FeedPost({
                       </AnimatePresence>
                     </motion.div>
                   ))}
-                  {/* Add photo */}
                   <motion.button
                     whileTap={{ scale: 0.92 }}
                     onClick={() => { editingIndexRef.current = -1; fileInputRef.current?.click(); }}
@@ -581,7 +434,6 @@ export default function FeedPost({
                 <p className="text-[11px] text-muted-foreground mt-1.5">Tap a photo to change or remove it</p>
               </div>
 
-              {/* Caption */}
               <div>
                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">Caption</label>
                 <textarea
@@ -673,7 +525,7 @@ export default function FeedPost({
                         <img src={p.photo_url} alt="thumb" className="w-full h-full object-cover" loading="lazy" decoding="async" />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-2xl">
-                          {p.post_type === 'meal' ? '🍽️' : p.post_type === 'workout' ? '💪' : '😔'}
+                          {POST_TYPE_EMOJI[p.post_type] || '✨'}
                         </div>
                       )}
                       <div className="absolute bottom-1 left-1 text-white text-[9px] font-bold drop-shadow">{p.post_date}</div>
@@ -694,204 +546,17 @@ export default function FeedPost({
 
       <Toast message={toastMessage} />
 
-      {/* Comments sheet */}
-      <AnimatePresence>
-        {showComments && (
-          <>
-            {!commentsExpanded && (
-              <div className="absolute inset-0 z-29" onClick={() => setShowComments(false)} />
-            )}
-            <motion.div
-              className="absolute left-0 right-0 bottom-0 z-30 bg-card rounded-t-2xl flex flex-col overflow-hidden"
-              style={{ height: commentsExpanded ? '100%' : '55%' }}
-              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
-              transition={{ type: 'spring', damping: 28, stiffness: 320 }}
-              onClick={e => e.stopPropagation()}
-            >
-              <div className="flex items-center gap-3 px-4 py-3 border-b border-border flex-shrink-0">
-                <motion.button whileTap={{ scale: 0.85 }} onClick={() => setShowComments(false)} className="p-1.5 rounded-full bg-secondary">
-                  <X size={15} />
-                </motion.button>
-                <p className="font-bold text-sm flex-1">Comments</p>
-                <motion.button whileTap={{ scale: 0.85 }} onClick={() => setCommentsExpanded(e => !e)} className="p-1.5 rounded-full bg-secondary">
-                  {commentsExpanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-                </motion.button>
-              </div>
-
-              {/* touchAction pan-y lets this div scroll natively despite the outer card's touchAction none */}
-              <div
-                ref={commentsScrollRef}
-                className="flex-1 overflow-y-auto px-4 py-3 space-y-5"
-                style={{ touchAction: 'pan-y' }}
-                onClick={() => setCommentMenuId(null)}
-              >
-                {loadingComments ? (
-                  <div className="flex justify-center py-8">
-                    <div className="w-6 h-6 border-2 border-border border-t-primary rounded-full animate-spin" />
-                  </div>
-                ) : comments.filter(c => !c.reply_to_id).length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground">
-                    <p className="text-3xl">💬</p>
-                    <p className="text-sm">No comments yet. Be the first!</p>
-                  </div>
-                ) : (() => {
-                  const topLevel = comments.filter(c => !c.reply_to_id);
-                  const repliesMap = {};
-                  comments.forEach(c => {
-                    if (c.reply_to_id) {
-                      if (!repliesMap[c.reply_to_id]) repliesMap[c.reply_to_id] = [];
-                      repliesMap[c.reply_to_id].push(c);
-                    }
-                  });
-
-                  const renderComment = (msg, isReply = false, rootId = null) => {
-                    const isMe = msg.sender_id === currentUserId;
-                    const isOptimistic = msg.id?.startsWith('opt_');
-                    const showMenu = commentMenuId === msg.id;
-                    const isEditingThis = editingCommentId === msg.id;
-                    const likedBy = msg.liked_by || [];
-                    const hasLiked = likedBy.includes(currentUserId);
-                    const likeCount = likedBy.length;
-                    const msgAuthorProfile = profiles[msg.sender_id];
-
-                    return (
-                      <div key={msg.id} className={`flex gap-3 ${isReply ? 'pl-11' : ''}`}>
-                        <div className="flex-shrink-0 mt-0.5">
-                          <Avatar profile={msgAuthorProfile} size="xs" noAutoFlip />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          {isEditingThis ? (
-                            <div className="flex gap-2 items-center">
-                              <input
-                                value={editingCommentText}
-                                onChange={e => setEditingCommentText(e.target.value)}
-                                onKeyDown={e => e.key === 'Enter' && saveCommentEdit(msg.id)}
-                                className="flex-1 bg-input border border-border rounded-full px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                                autoFocus
-                                onClick={e => e.stopPropagation()}
-                              />
-                              <button
-                                onClick={e => { e.stopPropagation(); saveCommentEdit(msg.id); }}
-                                className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-                                style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
-                              >✓</button>
-                              <button
-                                onClick={e => { e.stopPropagation(); setEditingCommentId(null); setCommentMenuId(null); }}
-                                className="w-7 h-7 rounded-full bg-secondary flex items-center justify-center text-xs flex-shrink-0"
-                              >✕</button>
-                            </div>
-                          ) : (
-                            <p className="text-sm leading-snug">
-                              <span className="font-bold mr-1.5">{msg.sender_name}</span>
-                              <span className="text-foreground">{msg.content}</span>
-                            </p>
-                          )}
-
-                          {!isEditingThis && (
-                            <div className="flex items-center gap-4 mt-1.5">
-                              <span className="text-xs text-muted-foreground">{timeAgo(msg.created_at || msg.created_date)}</span>
-                              <button
-                                className="text-xs font-semibold text-muted-foreground hover:text-foreground"
-                                onClick={e => { e.stopPropagation(); setReplyingTo({ id: isReply ? rootId : msg.id, name: msg.sender_name }); commentInputRef.current?.focus(); }}
-                              >Reply</button>
-                              {isMe && (
-                                <button
-                                  className="text-xs text-muted-foreground hover:text-foreground tracking-widest"
-                                  onClick={e => { e.stopPropagation(); setCommentMenuId(showMenu ? null : msg.id); }}
-                                >···</button>
-                              )}
-                            </div>
-                          )}
-
-                          {showMenu && !isEditingThis && (
-                            <div className="flex gap-1.5 mt-1.5" onClick={e => e.stopPropagation()}>
-                              {!isOptimistic && (
-                                <button
-                                  onClick={() => { setEditingCommentId(msg.id); setEditingCommentText(msg.content); setCommentMenuId(null); }}
-                                  className="px-2.5 py-1 rounded-lg bg-secondary text-xs font-semibold"
-                                >Edit</button>
-                              )}
-                              <button
-                                onClick={e => { e.stopPropagation(); deleteComment(msg.id); }}
-                                className="px-2.5 py-1 rounded-lg bg-destructive/15 text-destructive text-xs font-semibold"
-                              >Delete</button>
-                            </div>
-                          )}
-
-                          {!isReply && (() => {
-                            const replies = repliesMap[msg.id] || [];
-                            if (replies.length === 0) return null;
-                            const isExpanded = expandedReplies[msg.id];
-                            return (
-                              <div className="mt-2">
-                                <button
-                                  className="text-xs font-semibold text-primary/80 flex items-center gap-1"
-                                  onClick={e => { e.stopPropagation(); setExpandedReplies(prev => ({ ...prev, [msg.id]: !prev[msg.id] })); }}
-                                >
-                                  <span className="w-6 h-px bg-muted-foreground/40 inline-block" />
-                                  {isExpanded ? 'Hide replies' : `View ${replies.length} ${replies.length === 1 ? 'reply' : 'replies'}`}
-                                </button>
-                                {isExpanded && (
-                                  <div className="mt-3 space-y-4">
-                                    {replies.map(reply => renderComment(reply, true, msg.id))}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })()}
-                        </div>
-
-                        <div className="flex flex-col items-center gap-0.5 flex-shrink-0 pt-0.5">
-                          <button onClick={e => { e.stopPropagation(); toggleCommentLike(msg.id); }} className="p-1">
-                            <Heart size={13} className={hasLiked ? 'text-red-500 fill-red-500' : 'text-muted-foreground'} />
-                          </button>
-                          {likeCount > 0 && <span className="text-[10px] text-muted-foreground leading-none">{likeCount}</span>}
-                        </div>
-                      </div>
-                    );
-                  };
-
-                  return topLevel.map(msg => renderComment(msg, false));
-                })()}
-                <div ref={commentsBottomRef} />
-              </div>
-
-              <div className="border-t border-border flex-shrink-0">
-                {replyingTo && (
-                  <div className="flex items-center gap-2 px-4 pt-2.5 pb-0">
-                    <CornerDownRight size={12} className="text-muted-foreground flex-shrink-0" />
-                    <span className="text-xs text-muted-foreground flex-1">
-                      Replying to <span className="font-semibold text-foreground">{replyingTo.name}</span>
-                    </span>
-                    <button onClick={() => setReplyingTo(null)} className="text-muted-foreground">
-                      <X size={13} />
-                    </button>
-                  </div>
-                )}
-                <div className="flex gap-2 px-4 py-3">
-                  <input
-                    ref={commentInputRef}
-                    className="flex-1 bg-input border border-border rounded-full px-4 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                    placeholder={replyingTo ? `Reply to ${replyingTo.name}…` : 'Add a comment…'}
-                    value={commentText}
-                    onChange={e => setCommentText(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendComment()}
-                  />
-                  <motion.button
-                    whileTap={{ scale: 0.85 }}
-                    onClick={sendComment}
-                    disabled={sendingComment || !commentText.trim()}
-                    className="w-9 h-9 rounded-full flex items-center justify-center disabled:opacity-40 flex-shrink-0"
-                    style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
-                  >
-                    <Send size={14} />
-                  </motion.button>
-                </div>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+      <CommentsSheet
+        postId={commentPostId || post.id}
+        currentUserId={currentUserId}
+        profiles={profiles}
+        currentUserProfile={profiles[currentUserId]}
+        open={showComments}
+        expanded={commentsExpanded}
+        onExpandedChange={setCommentsExpanded}
+        onClose={() => setShowComments(false)}
+        onCommentCountChange={setCommentCount}
+      />
     </div>
   );
 }
@@ -905,7 +570,7 @@ function GridFocusedPost({ p, onComments }) {
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center gap-3 p-6"
             style={{ background: 'linear-gradient(135deg, hsl(var(--theme-accent-muted)), hsl(var(--card)))' }}>
-            <span className="text-6xl">{p.post_type === 'meal' ? '🍽️' : p.post_type === 'workout' ? '💪' : '😔'}</span>
+            <span className="text-6xl">{POST_TYPE_EMOJI[p.post_type] || '✨'}</span>
           </div>
         )}
       </div>

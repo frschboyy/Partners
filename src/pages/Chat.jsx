@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { api, supabase } from '@/api/supabaseClient';
 import { motion, AnimatePresence } from 'framer-motion';
 import Avatar from '@/components/Avatar';
-import ChatPicker from '@/components/ChatPicker';
+const ChatPicker = lazy(() => import('@/components/ChatPicker'));
 import { Send, ArrowLeft, Pencil, Trash2, Check, X as XIcon, Smile } from 'lucide-react';
 
 function formatTime(dateStr) {
@@ -432,10 +432,12 @@ export default function Chat({ currentUser, profile }) {
         <div className="relative flex-shrink-0 border-t border-border" ref={pickerRef}>
           <AnimatePresence>
             {showPicker && (
-              <ChatPicker
-                onEmojiSelect={emoji => { setText(prev => prev + emoji); setShowPicker(false); }}
-                onMediaSelect={sendMedia}
-              />
+              <Suspense fallback={null}>
+                <ChatPicker
+                  onEmojiSelect={emoji => { setText(prev => prev + emoji); setShowPicker(false); }}
+                  onMediaSelect={sendMedia}
+                />
+              </Suspense>
             )}
           </AnimatePresence>
           <div className="flex items-center gap-2 px-4 py-3 pb-20">

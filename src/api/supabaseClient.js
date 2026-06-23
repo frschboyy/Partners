@@ -126,45 +126,31 @@ export const api = {
         return { file_url: publicUrl };
       },
       async TranscribeAudio({ audio_url }) {
-        const resp = await fetch(audio_url);
-        const blob = await resp.blob();
-        const form = new FormData();
-        form.append('file', blob, 'recording.webm');
-        form.append('model', 'whisper-large-v3');
-        const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${import.meta.env.VITE_GROQ_API_KEY}` },
-          body: form,
+        const { data, error } = await supabase.functions.invoke('groq-proxy', {
+          body: { action: 'transcribe', audio_url },
         });
-        const json = await res.json();
-        return json.text || '';
+        if (error) throw error;
+        return data.text || '';
       },
       async GetEmbeddings(inputs) {
-        const res = await fetch('https://api.groq.com/openai/v1/embeddings', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${import.meta.env.VITE_GROQ_API_KEY}` },
-          body: JSON.stringify({ model: 'nomic-embed-text', input: inputs }),
+        const { data, error } = await supabase.functions.invoke('groq-proxy', {
+          body: { action: 'embeddings', inputs },
         });
-        const json = await res.json();
-        if (json.error) throw new Error(json.error.message);
-        return json.data.sort((a, b) => a.index - b.index).map(d => d.embedding);
+        if (error) throw error;
+        return data.embeddings;
       },
       async InvokeLLM({ prompt }) {
-        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${import.meta.env.VITE_GROQ_API_KEY}` },
-          body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }] }),
+        const { data, error } = await supabase.functions.invoke('groq-proxy', {
+          body: { action: 'llm', prompt },
         });
-        const json = await res.json();
-        return json.choices?.[0]?.message?.content || '';
+        if (error) throw error;
+        return data.content || '';
       },
       async SendEmail({ to, subject, body }) {
-        // Use Resend: https://resend.com
-        await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${import.meta.env.VITE_RESEND_API_KEY}` },
-          body: JSON.stringify({ from: 'onboarding@resend.dev', to, subject, html: body }),
+        const { error } = await supabase.functions.invoke('send-email', {
+          body: { to, subject, body },
         });
+        if (error) throw error;
       },
     },
   },
