@@ -47,9 +47,11 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
     if (!currentUser) return;
     loadAll();
     const unsubs = [
-      api.entities.Partnership.subscribe(() => loadAll()),
-      api.entities.PartnerRequest.subscribe(() => loadAll()),
-      api.entities.Rule.subscribe(() => loadAll()),
+      api.entities.Partnership.subscribeFiltered('user_a_id', currentUser.id, () => loadAll()),
+      api.entities.Partnership.subscribeFiltered('user_b_id', currentUser.id, () => loadAll()),
+      api.entities.PartnerRequest.subscribeFiltered('recipient_id', currentUser.id, () => loadAll()),
+      api.entities.PartnerRequest.subscribeFiltered('requester_id', currentUser.id, () => loadAll()),
+      api.entities.Rule.subscribeFiltered('user_id', currentUser.id, () => loadAll()),
     ];
     return () => unsubs.forEach(fn => fn());
   }, [currentUser]);
@@ -63,19 +65,20 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
   async function loadAll() {
     setLoading(true);
     try {
-      const [myRules, myPartnerships, declList] = await Promise.all([
+      const [myRules, partnershipsResult, declList] = await Promise.all([
         api.entities.Rule.filter({ user_id: currentUser.id }),
-        api.entities.Partnership.list(),
+        supabase
+          .from('partnerships')
+          .select('*')
+          .or(`user_a_id.eq.${currentUser.id},user_b_id.eq.${currentUser.id}`)
+          .neq('status', 'dissolved'),
         api.entities.SummertidesDeclaration.filter({ user_id: currentUser.id, year: today.getFullYear() }),
       ]);
 
       setRules(myRules.filter(r => r.active));
       setSummertidesDecl(declList[0] || null);
 
-      const myParties = myPartnerships.filter(p =>
-        (p.user_a_id === currentUser.id || p.user_b_id === currentUser.id) &&
-        p.status !== 'dissolved'
-      );
+      const myParties = partnershipsResult.data || [];
       setPartnerships(myParties);
 
       const partnerIds = myParties.map(p => p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id);
@@ -321,6 +324,12 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
 
           {/* Fixed-height scrollable card list — sized to show ~2 cards */}
           <div className="overflow-y-auto space-y-3" style={{ maxHeight: 384 }}>
+            {loading && (
+              <>
+                <div className="card-brutal p-3 h-20 animate-pulse bg-muted rounded-lg" />
+                <div className="card-brutal p-3 h-20 animate-pulse bg-muted rounded-lg" />
+              </>
+            )}
             {/* Negotiating partnerships — remain fully active, renegotiation is an overlay */}
             {negotiatingPartners.map(p => {
               const partnerId = p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id;
@@ -379,7 +388,7 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
             })}
 
             {/* Empty state */}
-            {activePartners.length === 0 && negotiatingPartners.length === 0 && (
+            {!loading && activePartners.length === 0 && negotiatingPartners.length === 0 && (
               <div className="card-brutal p-6 text-center">
                 <p className="text-3xl mb-2">🔭</p>
                 <p className="font-semibold">No partners yet</p>
@@ -446,6 +455,11 @@ export default function Home({ currentUser, profile, onProfileUpdate }) {
           rules={rules}
           activePartnerships={[...activePartners, ...negotiatingPartners]}
           partnerIds={partnerUserIds}
+          onOptimisticSlip={(ruleId) => {
+            setRules(prev => prev.map(r =>
+              r.id === ruleId ? { ...r, current_streak: 0 } : r
+            ));
+          }}
         />
 
         {/* View My Posts */}

@@ -8,7 +8,7 @@ import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import ScrollToTop from './components/ScrollToTop';
 import React, { useState, useEffect, useRef } from 'react';
-import { api } from '@/api/supabaseClient';
+import { api, supabase } from '@/api/supabaseClient';
 import { applyTheme, getSavedTheme, saveTheme, applyFontSize, getSavedFontSize, saveFontSize } from '@/lib/theme';
 
 // Pages
@@ -68,8 +68,8 @@ function MainApp({ user }) {
     checkUnread();
     checkNotifications();
     const unsub = api.entities.ChatMessage.subscribe(() => checkUnread());
-    const unsub2 = api.entities.Notification.subscribe(() => checkNotifications());
-    const unsub3 = api.entities.Slip.subscribe(() => checkNotifications());
+    const unsub2 = api.entities.Notification.subscribeFiltered('user_id', user.id, () => checkNotifications());
+    const unsub3 = api.entities.Slip.subscribeFiltered('user_id', user.id, () => checkNotifications());
     const unsub4 = api.entities.Post.subscribe(event => {
       if (event.type === 'insert' && event.data?.user_id !== user.id) {
         setNewFeedPosts(true);
@@ -114,16 +114,40 @@ function MainApp({ user }) {
   }
 
   async function checkUnread() {
-    const allPartnerships = await api.entities.Partnership.list();
-    const myPartnerships = allPartnerships.filter(
-      p => (p.user_a_id === user.id || p.user_b_id === user.id) && (p.status === 'active' || p.status === 'negotiating')
-    );
-    let total = 0;
-    for (const p of myPartnerships) {
-      const msgs = await api.entities.ChatMessage.filter({ partnership_id: p.id }, 'created_at', 100);
-      total += msgs.filter(m => !m.read_by?.includes(user.id) && m.sender_id !== user.id).length;
+    try {
+      const { data: myPartnerships } = await supabase
+        .from('partnerships')
+        .select('id')
+        .or(`user_a_id.eq.${user.id},user_b_id.eq.${user.id}`)
+        .in('status', ['active', 'negotiating']);
+
+      if (!myPartnerships?.length) { setUnreadMessages(0); return; }
+
+      const ids = myPartnerships.map(p => p.id);
+
+      // Try RPC first (requires SQL migration — see setup guide)
+      const { data: counts, error: rpcError } = await supabase.rpc('get_unread_counts', {
+        p_partnership_ids: ids,
+        p_user_id: user.id,
+      });
+
+      if (!rpcError && counts) {
+        setUnreadMessages(counts.reduce((sum, row) => sum + Number(row.unread_count), 0));
+        return;
+      }
+
+      // Fallback: single batch query — still far better than N+1
+      const { data: msgs } = await supabase
+        .from('chat_messages')
+        .select('read_by')
+        .in('partnership_id', ids)
+        .eq('is_deleted', false)
+        .neq('sender_id', user.id);
+
+      setUnreadMessages((msgs || []).filter(m => !m.read_by?.includes(user.id)).length);
+    } catch (err) {
+      console.error('checkUnread failed:', err?.message || err);
     }
-    setUnreadMessages(total);
   }
 
   function handleTabChange(tab) {

@@ -50,7 +50,23 @@ export function entityClient(tableName) {
         })
         ).subscribe();
       return () => supabase.removeChannel(channel);
-    }
+    },
+    subscribeFiltered(column, value, callback) {
+      const channelName = `${tableName}-${column}-${value}-${Math.random().toString(36).slice(2)}`;
+      const channel = supabase.channel(channelName)
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: tableName,
+          filter: `${column}=eq.${value}`,
+        }, payload => callback({
+          type: payload.eventType.toLowerCase(),
+          id: payload.new?.id || payload.old?.id,
+          data: payload.eventType === 'DELETE' ? payload.old : payload.new,
+        }))
+        .subscribe();
+      return () => supabase.removeChannel(channel);
+    },
   };
 }
 

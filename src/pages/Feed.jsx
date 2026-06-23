@@ -23,10 +23,11 @@ export default function Feed({ currentUser, profile }) {
     setLoading(true);
     try {
       // Partnerships first so we can scope all subsequent queries to relevant users only
-      const allPartnerships = await api.entities.Partnership.list();
-      const myPartnerships = allPartnerships.filter(
-        p => (p.user_a_id === currentUser.id || p.user_b_id === currentUser.id) && (p.status === 'active' || p.status === 'negotiating')
-      );
+      const { data: myPartnerships = [] } = await supabase
+        .from('partnerships')
+        .select('*')
+        .or(`user_a_id.eq.${currentUser.id},user_b_id.eq.${currentUser.id}`)
+        .in('status', ['active', 'negotiating']);
       setPartnerships(myPartnerships);
 
       const partnerIds = myPartnerships.map(p =>

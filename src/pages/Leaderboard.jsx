@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { api } from '@/api/supabaseClient';
+import React, { useState, useEffect, useMemo } from 'react';
+import { supabase } from '@/api/supabaseClient';
 import { Trophy, Flame, Camera, Dumbbell, Crown, AlertCircle, Users } from 'lucide-react';
 import Avatar from '@/components/Avatar';
 import { motion } from 'framer-motion';
@@ -15,22 +15,31 @@ export default function Leaderboard({ currentUser, profile }) {
 
   async function loadLeaderboard() {
     setLoading(true);
-    const [allPartnerships, allProfiles, allRules, allPosts, allSlips] = await Promise.all([
-      api.entities.Partnership.list(),
-      api.entities.UserProfile.list(),
-      api.entities.Rule.list(),
-      api.entities.Post.list('-created_at', 500),
-      api.entities.Slip.list('-slip_date', 500),
-    ]);
 
-    const myPartnerships = allPartnerships.filter(
-      p => (p.user_a_id === currentUser.id || p.user_b_id === currentUser.id) && (p.status === 'active' || p.status === 'negotiating')
-    );
+    const { data: myPartnerships = [] } = await supabase
+      .from('partnerships')
+      .select('user_a_id, user_b_id')
+      .or(`user_a_id.eq.${currentUser.id},user_b_id.eq.${currentUser.id}`)
+      .in('status', ['active', 'negotiating']);
 
     const partnerIds = myPartnerships.map(p =>
       p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id
     );
     const groupIds = [currentUser.id, ...partnerIds];
+
+    const [profilesResult, rulesResult, postsResult, slipsResult] = await Promise.all([
+      supabase.from('user_profiles').select('*').in('user_id', groupIds),
+      supabase.from('rules').select('*').in('user_id', groupIds).eq('active', true),
+      supabase.from('posts').select('*').in('user_id', groupIds)
+        .order('created_at', { ascending: false }).limit(500),
+      supabase.from('slips').select('*').in('user_id', groupIds)
+        .order('slip_date', { ascending: false }).limit(500),
+    ]);
+
+    const allProfiles = profilesResult.data || [];
+    const allRules = rulesResult.data || [];
+    const allPosts = postsResult.data || [];
+    const allSlips = slipsResult.data || [];
 
     const profileMap = {};
     allProfiles.forEach(pr => { profileMap[pr.user_id] = pr; });
@@ -38,7 +47,7 @@ export default function Leaderboard({ currentUser, profile }) {
 
     const stats = groupIds.map(userId => {
       const userProfile = profileMap[userId];
-      const userRules = allRules.filter(r => r.user_id === userId && r.active);
+      const userRules = allRules.filter(r => r.user_id === userId);
       const userPosts = allPosts.filter(p => p.user_id === userId);
 
       // Best rule streak
@@ -113,14 +122,14 @@ export default function Leaderboard({ currentUser, profile }) {
 
   const isSlipTab = activeTab === 'self-slips' || activeTab === 'partner-slips';
 
-  const sorted = [...entries].sort((a, b) => {
+  const sorted = useMemo(() => [...entries].sort((a, b) => {
     if (activeTab === 'streak')        return b.bestStreak - a.bestStreak;
     if (activeTab === 'posting')       return b.postStreak - a.postStreak;
     if (activeTab === 'gym')           return b.gymCount - a.gymCount;
     if (activeTab === 'self-slips')    return a.selfSlipCount - b.selfSlipCount;
     if (activeTab === 'partner-slips') return a.partnerSlipCount - b.partnerSlipCount;
     return 0;
-  });
+  }), [entries, activeTab]);
 
   function getMetric(entry) {
     if (activeTab === 'streak')        return `${entry.bestStreak} days`;
@@ -176,8 +185,18 @@ export default function Leaderboard({ currentUser, profile }) {
 
       <div className="flex-1 overflow-y-auto px-4 space-y-2">
         {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          <div className="space-y-2">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="flex items-center gap-3 p-4 rounded-xl border border-border animate-pulse">
+                <div className="w-8 h-8 rounded bg-muted" />
+                <div className="w-10 h-10 rounded-full bg-muted" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-3 bg-muted rounded w-28" />
+                  <div className="h-3 bg-muted rounded w-20" />
+                </div>
+                <div className="h-6 w-10 bg-muted rounded" />
+              </div>
+            ))}
           </div>
         ) : sorted.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 gap-3">

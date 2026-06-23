@@ -18,8 +18,8 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
   useEffect(() => {
     loadAll();
     const unsubs = [
-      api.entities.Notification.subscribe(() => loadAll()),
-      api.entities.Slip.subscribe(() => loadAll()),
+      api.entities.Notification.subscribeFiltered('user_id', currentUser.id, () => loadAll()),
+      api.entities.Slip.subscribeFiltered('user_id', currentUser.id, () => loadAll()),
     ];
     return () => unsubs.forEach(fn => fn());
   }, []);
@@ -31,13 +31,13 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
         api.entities.Notification.filter({ user_id: currentUser.id }, '-created_at', 30),
         api.entities.Slip.filter({ user_id: currentUser.id, status: 'pending' }),
       ]);
-      setNotifications(notifs);
+      const unreadIds = notifs.filter(n => !n.read).map(n => n.id);
+      setNotifications(notifs.map(n => ({ ...n, read: true })));
       setPendingSlips(slips);
 
-      // Batch-mark all unread notifications as read in a single query
-      const unreadIds = notifs.filter(n => !n.read).map(n => n.id);
+      // Fire-and-forget: mark read in background so the panel feels instant
       if (unreadIds.length > 0) {
-        await supabase
+        supabase
           .from('notifications')
           .update({ read: true })
           .in('id', unreadIds);
@@ -50,12 +50,6 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
 
   async function confirmSlip(slip) {
     await api.entities.Slip.update(slip.id, { status: 'confirmed' });
-    const myProfile = await api.entities.UserProfile.filter({ user_id: currentUser.id });
-    if (myProfile[0] && slip.penalty_amount > 0) {
-      await api.entities.UserProfile.update(myProfile[0].id, {
-        total_owed: (myProfile[0].total_owed || 0) + slip.penalty_amount,
-      });
-    }
     if (slip.reporter_id) {
       const name = profile?.display_name || 'Your partner';
       const penaltyNote = slip.penalty_amount > 0 ? ` — ${slip.penalty_amount} KSH penalty applied` : '';

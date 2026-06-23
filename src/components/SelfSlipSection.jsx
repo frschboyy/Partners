@@ -1,10 +1,10 @@
 import React, { useState, useRef } from 'react';
 import { Camera, X, CheckCircle } from 'lucide-react';
-import { api } from '@/api/supabaseClient';
+import { api, supabase } from '@/api/supabaseClient';
 import { motion, AnimatePresence } from 'framer-motion';
 import { compressImage } from '@/lib/imageUtils';
 
-export default function SelfSlipSection({ currentUser, profile, rules, activePartnerships, partnerIds }) {
+export default function SelfSlipSection({ currentUser, profile, rules, activePartnerships, partnerIds, onOptimisticSlip }) {
   const [selectedRuleId, setSelectedRuleId] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -32,44 +32,21 @@ export default function SelfSlipSection({ currentUser, profile, rules, activePar
     if (!selectedRuleId) return;
     setSaving(true);
     setError('');
+    onOptimisticSlip?.(selectedRuleId);
     const today = new Date().toISOString().split('T')[0];
     const rule = rules.find(r => r.id === selectedRuleId);
 
     try {
-      // One slip record per active partnership so financials are trackable per partner
-      for (const partnership of activePartnerships) {
-        await api.entities.Slip.create({
-          user_id: currentUser.id,
-          rule_id: selectedRuleId,
-          rule_title: rule?.title || '',
-          penalty_amount: partnership.penalty_amount || 0,
-          slip_type: 'self',
-          status: 'confirmed',
-          slip_date: today,
-          partnership_id: partnership.id,
-        });
-      }
-
-      // If no active partners, still log a standalone slip for personal tracking
-      if (activePartnerships.length === 0) {
-        await api.entities.Slip.create({
-          user_id: currentUser.id,
-          rule_id: selectedRuleId,
-          rule_title: rule?.title || '',
-          penalty_amount: 0,
-          slip_type: 'self',
-          status: 'confirmed',
-          slip_date: today,
-        });
-      }
-
-      // Reset rule streak
-      if (rule) {
-        await api.entities.Rule.update(selectedRuleId, {
-          current_streak: 0,
-          last_slip_date: today,
-        });
-      }
+      // Single atomic RPC: resets streak + inserts one slip per partnership with its own penalty
+      const { error: rpcError } = await supabase.rpc('log_self_slip', {
+        p_user_id: currentUser.id,
+        p_rule_id: selectedRuleId,
+        p_partnership_ids: activePartnerships.map(p => p.id),
+        p_penalty_amounts: activePartnerships.map(p => p.penalty_amount || 0),
+        p_notes: null,
+        p_post_id: null,
+      });
+      if (rpcError) throw rpcError;
 
       // Create post only when a photo is included
       if (photoUrl) {
