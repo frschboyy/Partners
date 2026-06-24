@@ -9,3 +9,4 @@ dist/
 coverage/
 
 QUALITY_FRAMEWORK.md
+/supabase/migrations

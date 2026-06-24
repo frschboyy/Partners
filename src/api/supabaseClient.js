@@ -236,9 +236,46 @@ export const api = {
     },
   },
   analytics: {
-    track({ eventName, properties }) {
-      // Optional: wire up to Posthog or just log
-      console.log('[analytics]', eventName, properties);
+    // Returns (or creates) a stable anonymous session ID for this browser session.
+    _sessionId: null,
+    _getSessionId() {
+      if (this._sessionId) return this._sessionId;
+      let id = sessionStorage.getItem('_a_sid');
+      if (!id) {
+        id = crypto.randomUUID();
+        sessionStorage.setItem('_a_sid', id);
+      }
+      this._sessionId = id;
+      return id;
+    },
+
+    // Track an anonymous feature-usage event. Never includes user_id.
+    async track({ eventName, properties = {} }) {
+      try {
+        await supabase.from('analytics_events').insert({
+          event_name: eventName,
+          session_id: api.analytics._getSessionId(),
+          date: new Date().toISOString().split('T')[0],
+          properties,
+        });
+      } catch {
+        // Analytics failures must never break the app
+      }
+    },
+
+    // Call once on app load to record the user as active today (for DAU/WAU/MAU).
+    // Uses upsert so multiple calls per day are idempotent.
+    async logActivity() {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        await supabase.from('user_activity_log').upsert(
+          { user_id: user.id, activity_date: new Date().toISOString().split('T')[0] },
+          { onConflict: 'user_id,activity_date' }
+        );
+      } catch {
+        // Silently ignore
+      }
     },
   },
   users: {

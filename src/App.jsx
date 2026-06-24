@@ -4,12 +4,16 @@ import { queryClientInstance } from '@/lib/query-client'
 import { BrowserRouter as Router, Route, Routes, Navigate } from 'react-router-dom';
 import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
+import { AdminAuthProvider } from '@/lib/AdminAuthContext';
 import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 import ProtectedRoute from '@/components/ProtectedRoute';
+import AdminProtectedRoute from '@/components/admin/AdminProtectedRoute';
 import ScrollToTop from './components/ScrollToTop';
 import React, { useState, useEffect, useRef } from 'react';
 import { api, supabase } from '@/api/supabaseClient';
 import { applyTheme, getSavedTheme, saveTheme, applyFontSize, getSavedFontSize, saveFontSize } from '@/lib/theme';
+import AdminLogin from './pages/admin/AdminLogin';
+import AdminDashboard from './pages/admin/AdminDashboard';
 
 // Pages
 import Login from './pages/Login';
@@ -86,7 +90,10 @@ function MainApp({ user }) {
   }, []);
 
   useEffect(() => {
-    if (user) loadProfile();
+    if (user) {
+      loadProfile();
+      api.analytics.logActivity();
+    }
   }, [user]);
 
   useEffect(() => {
@@ -345,25 +352,55 @@ function PublicRoute({ element }) {
   return element;
 }
 
+// Admin sub-app — completely isolated from user auth flow
+function AdminApp() {
+  return (
+    <AdminAuthProvider>
+      <Routes>
+        <Route path="login" element={<AdminLogin />} />
+        <Route
+          path="*"
+          element={
+            <AdminProtectedRoute>
+              <AdminDashboard />
+            </AdminProtectedRoute>
+          }
+        />
+      </Routes>
+    </AdminAuthProvider>
+  );
+}
+
 function App() {
   return (
-    <AuthProvider>
-      <QueryClientProvider client={queryClientInstance}>
-        <Router>
-          <ScrollToTop />
-          <Routes>
-            <Route path="/login" element={<PublicRoute element={<Login />} />} />
-            <Route path="/register" element={<PublicRoute element={<Register />} />} />
-            <Route path="/forgot-password" element={<ForgotPassword />} />
-            <Route path="/reset-password" element={<ResetPassword />} />
-            <Route element={<ProtectedRoute unauthenticatedElement={<Navigate to="/login" replace />} fallback={<LoadingScreen />} />}>
-              <Route path="*" element={<AuthenticatedApp />} />
-            </Route>
-          </Routes>
-        </Router>
-        <Toaster />
-      </QueryClientProvider>
-    </AuthProvider>
+    <QueryClientProvider client={queryClientInstance}>
+      <Router>
+        <ScrollToTop />
+        <Routes>
+          {/* Admin routes — separate auth, no overlap with user app */}
+          <Route path="/admin/*" element={<AdminApp />} />
+
+          {/* Main user app routes */}
+          <Route
+            path="*"
+            element={
+              <AuthProvider>
+                <Routes>
+                  <Route path="/login" element={<PublicRoute element={<Login />} />} />
+                  <Route path="/register" element={<PublicRoute element={<Register />} />} />
+                  <Route path="/forgot-password" element={<ForgotPassword />} />
+                  <Route path="/reset-password" element={<ResetPassword />} />
+                  <Route element={<ProtectedRoute unauthenticatedElement={<Navigate to="/login" replace />} fallback={<LoadingScreen />} />}>
+                    <Route path="*" element={<AuthenticatedApp />} />
+                  </Route>
+                </Routes>
+              </AuthProvider>
+            }
+          />
+        </Routes>
+      </Router>
+      <Toaster />
+    </QueryClientProvider>
   );
 }
 
