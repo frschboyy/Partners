@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/api/supabaseClient';
-import { Trophy, Flame, Camera, Dumbbell, Crown, AlertCircle, Users } from 'lucide-react';
+import { Trophy, Flame, Camera, Dumbbell, Crown, AlertCircle, Users, Banknote } from 'lucide-react';
 import Avatar from '@/components/Avatar';
 import { motion } from 'framer-motion';
 
@@ -8,6 +8,8 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('streak');
+
+  const currencyLabel = profile?.currency_label || 'KSH';
 
   useEffect(() => {
     if (currentUser) loadLeaderboard();
@@ -27,23 +29,44 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
     );
     const groupIds = [currentUser.id, ...partnerIds];
 
-    const [profilesResult, rulesResult, postsResult, slipsResult] = await Promise.all([
+    // Load all partnerships within the group (for correct penalty attribution)
+    const groupOrFilter = [
+      ...groupIds.map(id => `user_a_id.eq.${id}`),
+      ...groupIds.map(id => `user_b_id.eq.${id}`),
+    ].join(',');
+
+    const [profilesResult, rulesResult, postsResult, slipsResult, allPartnershipsResult] = await Promise.all([
       supabase.from('user_profiles').select('*').in('user_id', groupIds),
       supabase.from('rules').select('*').in('user_id', groupIds).eq('active', true),
       supabase.from('posts').select('*').in('user_id', groupIds)
         .order('created_at', { ascending: false }).limit(500),
       supabase.from('slips').select('*').in('user_id', groupIds)
-        .order('slip_date', { ascending: false }).limit(500),
+        .order('slip_date', { ascending: false }).limit(1000),
+      supabase.from('partnerships').select('id, user_a_id, user_b_id').or(groupOrFilter).neq('status', 'dissolved'),
     ]);
 
     const allProfiles = profilesResult.data || [];
     const allRules = rulesResult.data || [];
     const allPosts = postsResult.data || [];
     const allSlips = slipsResult.data || [];
+    const allGroupPartnerships = allPartnershipsResult.data || [];
+
+    // Map: partnershipId → [user_a_id, user_b_id]
+    const partnershipParties = {};
+    allGroupPartnerships.forEach(p => {
+      partnershipParties[p.id] = [p.user_a_id, p.user_b_id];
+    });
 
     const profileMap = {};
     allProfiles.forEach(pr => { profileMap[pr.user_id] = pr; });
     if (profile) profileMap[currentUser.id] = profile;
+
+    function effectivePenalty(s) {
+      if (s.penalty_waived) return 0;
+      return s.slip_type === 'self'
+        ? (s.penalty_amount || 0) * 0.5
+        : (s.penalty_amount || 0);
+    }
 
     const stats = groupIds.map(userId => {
       const userProfile = profileMap[userId];
@@ -71,10 +94,8 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
         p.post_type === 'workout' && new Date(p.post_date) >= thirtyDaysAgo
       ).length;
 
-      // Slips
+      // Slips (leaderboard — existing logic)
       const userSlips = allSlips.filter(s => s.user_id === userId);
-
-      // Deduplicate self-slips: one event may create one record per partnership
       const selfSlipsRaw = userSlips.filter(s => s.slip_type === 'self');
       const seenSelfSlipKeys = new Set();
       const selfSlips = selfSlipsRaw.filter(s => {
@@ -83,15 +104,45 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
         seenSelfSlipKeys.add(key);
         return true;
       });
-
-      const partnerSlips = userSlips.filter(s => s.slip_type === 'witnessed' || (s.reporter_id && s.reporter_id !== userId));
-
+      const partnerSlips = userSlips.filter(s =>
+        s.slip_type === 'witnessed' || (s.reporter_id && s.reporter_id !== userId)
+      );
       const selfSlipCount = selfSlips.length;
-      // 50% penalty reduction for self-reported slips; penalty_amount stores the full agreed penalty
       const selfSlipPenalty = selfSlips.reduce((sum, s) => sum + (s.penalty_amount || 0) * 0.5, 0);
-
       const partnerSlipCount = partnerSlips.length;
       const partnerSlipPenalty = partnerSlips.reduce((sum, s) => sum + (s.penalty_amount || 0), 0);
+
+      // ── All-time balance ─────────────────────────────────────────────────
+      // Paid: all this user's confirmed/confirmed slips (not disputed/pending)
+      const countableUserSlips = userSlips.filter(s =>
+        s.status !== 'disputed' && s.status !== 'pending'
+      );
+      const seenPaidKeys = new Set();
+      const dedupedPaidSlips = countableUserSlips.filter(s => {
+        if (s.slip_type !== 'self') return true;
+        const key = `${s.slip_date}-${s.rule_id || s.rule_title}`;
+        if (seenPaidKeys.has(key)) return false;
+        seenPaidKeys.add(key);
+        return true;
+      });
+      const allTimePaid = Math.round(
+        dedupedPaidSlips.reduce((sum, s) => sum + effectivePenalty(s), 0)
+      );
+
+      // Received: slips from others that happened in a partnership involving this user
+      // Uses partnership_id to correctly attribute each slip to its recipient
+      const receivedSlips = allSlips.filter(s =>
+        s.user_id !== userId &&
+        s.status !== 'disputed' &&
+        s.status !== 'pending' &&
+        s.partnership_id &&
+        partnershipParties[s.partnership_id]?.includes(userId)
+      );
+      const allTimeReceived = Math.round(
+        receivedSlips.reduce((sum, s) => sum + effectivePenalty(s), 0)
+      );
+
+      const allTimeNet = allTimeReceived - allTimePaid;
 
       return {
         userId,
@@ -104,6 +155,9 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
         selfSlipPenalty,
         partnerSlipCount,
         partnerSlipPenalty,
+        allTimePaid,
+        allTimeReceived,
+        allTimeNet,
         isMe: userId === currentUser.id,
       };
     });
@@ -113,14 +167,16 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
   }
 
   const tabs = [
-    { id: 'streak',        label: 'Streak',         icon: Flame },
-    { id: 'posting',       label: 'Posting',         icon: Camera },
-    { id: 'gym',           label: 'Gym',             icon: Dumbbell },
-    { id: 'self-slips',    label: 'Self Slips',      icon: AlertCircle },
-    { id: 'partner-slips', label: 'Partner Slips',   icon: Users },
+    { id: 'streak',        label: 'Streak',       icon: Flame },
+    { id: 'posting',       label: 'Posting',       icon: Camera },
+    { id: 'gym',           label: 'Gym',           icon: Dumbbell },
+    { id: 'self-slips',    label: 'Self Slips',    icon: AlertCircle },
+    { id: 'partner-slips', label: 'Partner Slips', icon: Users },
+    { id: 'balance',       label: 'Ledger',        icon: Banknote },
   ];
 
   const isSlipTab = activeTab === 'self-slips' || activeTab === 'partner-slips';
+  const isBalanceTab = activeTab === 'balance';
 
   const sorted = useMemo(() => [...entries].sort((a, b) => {
     if (activeTab === 'streak')        return b.bestStreak - a.bestStreak;
@@ -128,6 +184,7 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
     if (activeTab === 'gym')           return b.gymCount - a.gymCount;
     if (activeTab === 'self-slips')    return a.selfSlipCount - b.selfSlipCount;
     if (activeTab === 'partner-slips') return a.partnerSlipCount - b.partnerSlipCount;
+    if (activeTab === 'balance')       return b.allTimeNet - a.allTimeNet;
     return 0;
   }), [entries, activeTab]);
 
@@ -135,16 +192,31 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
     if (activeTab === 'streak')        return `${entry.bestStreak} days`;
     if (activeTab === 'posting')       return `${entry.postStreak} day streak`;
     if (activeTab === 'gym')           return `${entry.gymCount} workouts`;
-    if (activeTab === 'self-slips')    return `${entry.selfSlipCount} slip${entry.selfSlipCount !== 1 ? 's' : ''} · KSH ${entry.selfSlipPenalty.toFixed(0)} (50% off)`;
-    if (activeTab === 'partner-slips') return `${entry.partnerSlipCount} slip${entry.partnerSlipCount !== 1 ? 's' : ''} · KSH ${entry.partnerSlipPenalty.toFixed(0)}`;
+    if (activeTab === 'self-slips')    return `${entry.selfSlipCount} slip${entry.selfSlipCount !== 1 ? 's' : ''} · ${currencyLabel} ${entry.selfSlipPenalty.toFixed(0)} (50% off)`;
+    if (activeTab === 'partner-slips') return `${entry.partnerSlipCount} slip${entry.partnerSlipCount !== 1 ? 's' : ''} · ${currencyLabel} ${entry.partnerSlipPenalty.toFixed(0)}`;
+    if (activeTab === 'balance')       return `Paid: ${currencyLabel} ${entry.allTimePaid} · Received: ${currencyLabel} ${entry.allTimeReceived}`;
   }
 
-  function getBigNumber(entry) {
-    if (activeTab === 'streak')        return entry.bestStreak;
-    if (activeTab === 'posting')       return entry.postStreak;
-    if (activeTab === 'gym')           return entry.gymCount;
-    if (activeTab === 'self-slips')    return entry.selfSlipCount;
-    if (activeTab === 'partner-slips') return entry.partnerSlipCount;
+  function getBigDisplay(entry) {
+    if (activeTab === 'streak')        return { value: entry.bestStreak, sub: null };
+    if (activeTab === 'posting')       return { value: entry.postStreak, sub: null };
+    if (activeTab === 'gym')           return { value: entry.gymCount, sub: null };
+    if (activeTab === 'self-slips')    return { value: entry.selfSlipCount, sub: null };
+    if (activeTab === 'partner-slips') return { value: entry.partnerSlipCount, sub: null };
+    if (activeTab === 'balance') {
+      const sign = entry.allTimeNet > 0 ? '+' : '';
+      return { value: `${sign}${entry.allTimeNet}`, sub: currencyLabel };
+    }
+  }
+
+  function getBigColor(entry) {
+    if (isSlipTab) return 'hsl(var(--destructive))';
+    if (isBalanceTab) {
+      if (entry.allTimeNet > 0) return 'hsl(var(--theme-accent))';
+      if (entry.allTimeNet < 0) return 'hsl(var(--destructive))';
+      return 'hsl(var(--muted-foreground))';
+    }
+    return 'hsl(var(--theme-accent))';
   }
 
   return (
@@ -157,7 +229,7 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
         <p className="text-sm text-muted-foreground mt-1">Your partner group rankings</p>
       </div>
 
-      {/* Tabs — scrollable so all 5 fit on small screens */}
+      {/* Tabs */}
       <div className="flex gap-1.5 px-4 mb-4 overflow-x-auto pb-1 scrollbar-none">
         {tabs.map(({ id, label, icon: Icon }) => (
           <button
@@ -182,8 +254,13 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
             : 'Reported by your partner · full penalty applies'}
         </p>
       )}
+      {isBalanceTab && (
+        <p className="text-center text-xs text-muted-foreground mb-3 px-4">
+          All-time penalties paid vs received · permanent record
+        </p>
+      )}
 
-      <div className="flex-1 overflow-y-auto px-4 space-y-2">
+      <div className="flex-1 overflow-y-auto px-4 space-y-2 pb-6">
         {loading ? (
           <div className="space-y-2">
             {[1, 2, 3].map(i => (
@@ -227,6 +304,10 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
         ) : (
           sorted.map((entry, idx) => {
             const rankEmoji = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`;
+            const display = getBigDisplay(entry);
+            const bigColor = getBigColor(entry);
+            const showCrown = idx === 0 && !isSlipTab;
+
             return (
               <motion.div
                 key={entry.userId}
@@ -247,23 +328,73 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
                     {entry.name}
                     {entry.isMe && <span className="ml-1.5 text-xs text-muted-foreground">(you)</span>}
                   </p>
-                  <p className="text-xs text-muted-foreground">{getMetric(entry)}</p>
+                  <p className="text-xs text-muted-foreground truncate">{getMetric(entry)}</p>
                 </div>
-                <div className="text-right">
-                  <p
-                    className="text-xl font-bold font-display-mono"
-                    style={{ color: isSlipTab ? 'hsl(var(--destructive))' : 'hsl(var(--theme-accent))' }}
-                  >
-                    {getBigNumber(entry)}
+                <div className="text-right flex-shrink-0">
+                  <p className="text-xl font-bold font-display-mono leading-none" style={{ color: bigColor }}>
+                    {display.value}
                   </p>
+                  {display.sub && (
+                    <p className="text-[10px] text-muted-foreground mt-0.5">{display.sub}</p>
+                  )}
                 </div>
-                {idx === 0 && !isSlipTab && (
+                {showCrown && (
                   <Crown size={18} style={{ color: 'hsl(var(--theme-accent))' }} />
                 )}
               </motion.div>
             );
           })
         )}
+
+        {/* All-time balance breakdown for current user */}
+        {isBalanceTab && !loading && entries.length > 0 && (() => {
+          const me = entries.find(e => e.isMe);
+          if (!me) return null;
+          return (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: entries.length * 0.05 + 0.1 }}
+              className="mt-2 rounded-xl border border-border bg-card p-4 space-y-3"
+              style={{ boxShadow: '3px 3px 0px hsl(var(--border))' }}
+            >
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Your breakdown</p>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="text-center">
+                  <p className="text-xs text-muted-foreground mb-1">Paid out</p>
+                  <p className="font-bold text-base font-display-mono text-destructive">
+                    {me.allTimePaid}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">{currencyLabel}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-xs text-muted-foreground mb-1">Received</p>
+                  <p className="font-bold text-base font-display-mono" style={{ color: 'hsl(var(--theme-accent))' }}>
+                    {me.allTimeReceived}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">{currencyLabel}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-xs text-muted-foreground mb-1">Net</p>
+                  <p
+                    className="font-bold text-base font-display-mono"
+                    style={{ color: me.allTimeNet > 0 ? 'hsl(var(--theme-accent))' : me.allTimeNet < 0 ? 'hsl(var(--destructive))' : 'hsl(var(--muted-foreground))' }}
+                  >
+                    {me.allTimeNet > 0 ? '+' : ''}{me.allTimeNet}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">{currencyLabel}</p>
+                </div>
+              </div>
+              <p className="text-[10px] text-muted-foreground text-center">
+                {me.allTimeNet > 0
+                  ? `Partners have paid you ${me.allTimeNet} ${currencyLabel} more than you've paid them.`
+                  : me.allTimeNet < 0
+                  ? `You've paid ${Math.abs(me.allTimeNet)} ${currencyLabel} more than your partners have paid you.`
+                  : "Perfectly even — same amount exchanged both ways."}
+              </p>
+            </motion.div>
+          );
+        })()}
       </div>
     </div>
   );

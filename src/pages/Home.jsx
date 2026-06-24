@@ -448,7 +448,10 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
                     currentUserId={currentUser.id}
                     currentUserName={profile?.display_name || currentUser.full_name}
                     partnerName={partnerName}
+                    partnerUserId={partnerId}
                     currencyLabel={profile?.currency_label || 'KSH'}
+                    onToast={showHomeToast}
+                    onSettled={loadAll}
                   />
                   <div className="mt-2 pt-2 border-t border-border">
                     <button
@@ -526,7 +529,10 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
                     currentUserId={currentUser.id}
                     currentUserName={profile?.display_name || currentUser.full_name}
                     partnerName={partnerName}
+                    partnerUserId={partnerId}
                     currencyLabel={profile?.currency_label || 'KSH'}
+                    onToast={showHomeToast}
+                    onSettled={loadAll}
                   />
                   <div className="mt-2 pt-2 border-t border-border">
                     <button

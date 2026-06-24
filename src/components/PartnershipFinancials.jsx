@@ -1,13 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, ChevronUp } from 'lucide-react';
-import { api } from '@/api/supabaseClient';
+import { api, supabase } from '@/api/supabaseClient';
 import { formatDate } from '@/lib/dateUtils';
 
-export default function PartnershipFinancials({ partnership, currentUserId, currentUserName, partnerName, currencyLabel = 'KSH' }) {
+export default function PartnershipFinancials({
+  partnership,
+  currentUserId,
+  currentUserName,
+  partnerName,
+  partnerUserId,
+  currencyLabel = 'KSH',
+  onToast,
+  onSettled,
+}) {
   const [slips, setSlips] = useState(null);
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [settling, setSettling] = useState(false);
+  const [settlePending, setSettlePending] = useState(false);
 
   useEffect(() => {
     loadSlips();
@@ -29,8 +40,14 @@ export default function PartnershipFinancials({ partnership, currentUserId, curr
     return <div className="h-6 w-32 bg-muted rounded animate-pulse mt-2" />;
   }
 
-  const mySlips = slips.filter(s => s.user_id === currentUserId);
-  const partnerSlips = slips.filter(s => s.user_id !== currentUserId);
+  // Only count slips after balance_settled_at (if set)
+  const settledSince = partnership.balance_settled_at;
+  const relevantSlips = settledSince
+    ? slips.filter(s => new Date(s.slip_date + 'T00:00:00') >= new Date(settledSince))
+    : slips;
+
+  const mySlips = relevantSlips.filter(s => s.user_id === currentUserId);
+  const partnerSlips = relevantSlips.filter(s => s.user_id !== currentUserId);
 
   function effectivePenalty(s) {
     if (s.penalty_waived) return 0;
@@ -50,8 +67,51 @@ export default function PartnershipFinancials({ partnership, currentUserId, curr
     ? `${partnerName} owes you`
     : "You're even";
 
+  async function handleSettle() {
+    if (settling || settlePending) return;
+    setSettling(true);
+    try {
+      if (net < 0) {
+        // I owe — send a settlement claim to partner
+        await supabase.from('notifications').insert({
+          user_id: partnerUserId,
+          type: 'balance_settle_request',
+          title: 'Balance settlement claimed',
+          body: `${currentUserName} claims to have settled the ${Math.abs(net)} ${currencyLabel} balance.`,
+          from_user_id: currentUserId,
+          from_user_name: currentUserName,
+          action_id: partnership.id,
+          read: false,
+          actioned: false,
+        });
+        setSettlePending(true);
+        onToast?.(`Settlement request sent to ${partnerName}`);
+      } else {
+        // I'm owed — forgive immediately, log it
+        const now = new Date().toISOString();
+        await supabase.from('partnerships').update({ balance_settled_at: now }).eq('id', partnership.id);
+        await supabase.from('notifications').insert({
+          user_id: currentUserId,
+          type: 'self_balance_cleared',
+          title: 'Balance cleared',
+          body: `You cleared the ${net} ${currencyLabel} balance with ${partnerName}.`,
+          from_user_id: currentUserId,
+          from_user_name: currentUserName,
+          read: true,
+          actioned: false,
+        });
+        onSettled?.();
+        onToast?.('Balance cleared ✓');
+      }
+    } catch (err) {
+      console.error('Settle error:', err);
+      onToast?.('Failed to settle — please try again');
+    }
+    setSettling(false);
+  }
+
   return (
-    <div className="mt-3 pt-3 border-t border-border">
+    <div className="mt-3 pt-3 border-t border-border space-y-2">
       <button className="w-full text-left" onClick={() => setExpanded(e => !e)}>
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Financials</span>
@@ -82,6 +142,27 @@ export default function PartnershipFinancials({ partnership, currentUserId, curr
         </div>
       </button>
 
+      {/* Settle balance button — only when balance outstanding */}
+      {net !== 0 && (
+        <button
+          onClick={handleSettle}
+          disabled={settling || settlePending}
+          className="w-full py-1.5 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-50"
+          style={
+            settlePending
+              ? { borderColor: 'hsl(var(--border))', color: 'hsl(var(--muted-foreground))', background: 'hsl(var(--secondary))' }
+              : net < 0
+              ? { borderColor: 'hsl(var(--destructive) / 0.4)', color: 'hsl(var(--destructive))', background: 'hsl(var(--destructive) / 0.06)' }
+              : { borderColor: 'hsl(var(--theme-accent) / 0.4)', color: 'hsl(var(--theme-accent))', background: 'hsl(var(--theme-accent) / 0.06)' }
+          }
+        >
+          {settling ? 'Processing…'
+            : settlePending ? '⏳ Awaiting confirmation'
+            : net < 0 ? '💸 I settled this'
+            : '✓ Mark as settled'}
+        </button>
+      )}
+
       <AnimatePresence>
         {expanded && (
           <motion.div
@@ -91,7 +172,13 @@ export default function PartnershipFinancials({ partnership, currentUserId, curr
             transition={{ duration: 0.2 }}
             className="overflow-hidden"
           >
-            <div className="mt-3 space-y-4">
+            <div className="space-y-4">
+              {settledSince && (
+                <p className="text-[10px] text-muted-foreground text-center">
+                  Showing slips since last settlement · {new Date(settledSince).toLocaleDateString()}
+                </p>
+              )}
+
               {/* My slips */}
               <div>
                 <p className="text-xs font-semibold text-muted-foreground mb-1.5">Your slips</p>

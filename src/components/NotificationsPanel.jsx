@@ -20,6 +20,8 @@ function getAction(n) {
       return { label: 'View new terms', tab: 'home', intent: { action: 'openAgreement', fromUserId: n.from_user_id } };
     case 'slip_confirmed':
     case 'slip_disputed':
+    case 'balance_settled':
+    case 'balance_denied':
       return { label: 'View financials', tab: 'home', intent: { action: 'viewPartners' } };
     case 'new_message':
       return { label: 'Open chat', tab: 'chat', intent: { action: 'openChat', fromUserId: n.from_user_id } };
@@ -110,6 +112,40 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
     showToast('Slip disputed — your partner has been notified.');
   }
 
+  async function confirmSettlement(n) {
+    const now = new Date().toISOString();
+    setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, actioned: true } : x));
+    await supabase.from('partnerships').update({ balance_settled_at: now }).eq('id', n.action_id);
+    supabase.from('notifications').update({ actioned: true, read: true }).eq('id', n.id);
+    supabase.from('notifications').insert({
+      user_id: n.from_user_id,
+      type: 'balance_settled',
+      title: 'Settlement confirmed',
+      body: `${profile?.display_name || 'Your partner'} confirmed your balance settlement. Balance cleared.`,
+      from_user_id: currentUser.id,
+      from_user_name: profile?.display_name,
+      read: false,
+      actioned: false,
+    });
+    showToast('Balance settled ✓');
+  }
+
+  async function denySettlement(n) {
+    setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, actioned: true } : x));
+    supabase.from('notifications').update({ actioned: true, read: true }).eq('id', n.id);
+    supabase.from('notifications').insert({
+      user_id: n.from_user_id,
+      type: 'balance_denied',
+      title: 'Settlement not confirmed',
+      body: `${profile?.display_name || 'Your partner'} did not confirm the settlement. The balance remains.`,
+      from_user_id: currentUser.id,
+      from_user_name: profile?.display_name,
+      read: false,
+      actioned: false,
+    });
+    showToast('Settlement denied — balance unchanged.');
+  }
+
   const typeIcons = {
     partner_request: '🤝',
     request_accepted: '✅',
@@ -121,6 +157,8 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
     new_message: '💬',
     summertides_declared: '🌊',
     partner_removed: '👋',
+    balance_settled: '✅',
+    balance_denied: '❌',
   };
 
   const selfIcons = {
@@ -128,12 +166,18 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
     self_rule_added: '📌',
     self_slip_logged: '😤',
     self_partnership_formed: '🤝',
+    self_balance_cleared: '💸',
   };
 
   const selfNotifs = notifications.filter(n => n.type?.startsWith('self_'));
-  const partnerNotifs = notifications.filter(n => !n.type?.startsWith('self_'));
+  // Unactioned settlement requests are handled as interactive cards, not in the main list
+  const pendingSettlements = notifications.filter(n => n.type === 'balance_settle_request' && !n.actioned);
+  const partnerNotifs = notifications.filter(n =>
+    !n.type?.startsWith('self_') &&
+    !(n.type === 'balance_settle_request' && !n.actioned)
+  );
 
-  const isEmpty = !loading && partnerNotifs.length === 0 && pendingSlips.length === 0 && !needsSetPassword;
+  const isEmpty = !loading && partnerNotifs.length === 0 && pendingSlips.length === 0 && pendingSettlements.length === 0 && !needsSetPassword;
 
   return (
     <motion.div
@@ -170,6 +214,40 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
             </button>
           </div>
         )}
+
+        {/* Pending settlement confirmations */}
+        {pendingSettlements.map(n => (
+          <div key={n.id} className="card-brutal-accent p-4 space-y-3">
+            <div className="flex gap-2">
+              <span className="text-2xl">💸</span>
+              <div>
+                <p className="font-bold text-sm">{n.from_user_name} claims to have settled</p>
+                <p className="text-sm text-muted-foreground mt-1">{n.body}</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => confirmSettlement(n)}
+                className="flex-1 py-2 rounded-lg font-bold text-sm"
+                style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
+              >
+                Confirm
+              </button>
+              <button
+                onClick={() => { onNavigate?.('home', { action: 'viewPartners' }); onClose(); }}
+                className="px-3 py-2 rounded-lg font-semibold text-xs bg-secondary text-foreground"
+              >
+                View financials
+              </button>
+              <button
+                onClick={() => denySettlement(n)}
+                className="flex-1 py-2 rounded-lg font-semibold text-sm bg-secondary text-foreground"
+              >
+                Deny
+              </button>
+            </div>
+          </div>
+        ))}
 
         {/* Pending slip confirmations */}
         {pendingSlips.map(slip => (
