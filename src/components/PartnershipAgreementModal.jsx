@@ -190,6 +190,35 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
     }
   }
 
+  async function handleWithdraw() {
+    setSaving(true);
+    setSaveError('');
+    try {
+      await api.entities.Partnership.update(partnership.id, {
+        last_proposer_id: null,
+        user_a_agreed: false,
+        user_b_agreed: false,
+      });
+      const partnerId = isUserA ? partnership.user_b_id : partnership.user_a_id;
+      await supabase.from('notifications').insert({
+        user_id: partnerId,
+        type: 'partnership_proposal',
+        title: `${myName} withdrew their proposal`,
+        body: 'The proposal has been pulled back. Either of you can now submit new terms.',
+        from_user_id: currentUserId,
+        from_user_name: myName,
+        action_id: partnership.id,
+        action_type: 'partnership_proposal',
+        read: false,
+      });
+      onClose();
+    } catch (err) {
+      setSaveError('Failed to withdraw proposal — please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleDecline() {
     setSaving(true);
     setSaveError('');
@@ -561,16 +590,28 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
                 </motion.button>
               </>
             ) : (
-              <motion.button
-                whileTap={{ scale: 0.96 }}
-                onClick={handleSubmitProposal}
-                disabled={saving || iProposed}
-                className="w-full py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
-                style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
-              >
-                <Send size={15} />
-                {saving ? 'Sending…' : iProposed ? 'Proposal sent — awaiting response' : 'Submit Proposal'}
-              </motion.button>
+              <>
+                <motion.button
+                  whileTap={{ scale: 0.96 }}
+                  onClick={handleSubmitProposal}
+                  disabled={saving || iProposed}
+                  className="w-full py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+                  style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
+                >
+                  <Send size={15} />
+                  {saving ? 'Sending…' : iProposed ? 'Proposal sent — awaiting response' : 'Submit Proposal'}
+                </motion.button>
+                {iProposed && (
+                  <motion.button
+                    whileTap={{ scale: 0.96 }}
+                    onClick={handleWithdraw}
+                    disabled={saving}
+                    className="w-full py-2 rounded-lg text-xs font-semibold text-muted-foreground border border-border bg-secondary"
+                  >
+                    Withdraw proposal
+                  </motion.button>
+                )}
+              </>
             )}
           </div>
         </motion.div>
