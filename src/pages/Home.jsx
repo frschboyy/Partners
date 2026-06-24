@@ -54,16 +54,10 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
   const partnersRef = useRef(null);
   const [partnerSearch, setPartnerSearch] = useState('');
 
-  const [timerSeconds, setTimerSeconds] = useState(0);
+  const [lastSlipAt, setLastSlipAt] = useState(null);
+  const [now, setNow] = useState(() => new Date());
   useEffect(() => {
-    function tick() {
-      const now = new Date();
-      const midnight = new Date(now);
-      midnight.setHours(0, 0, 0, 0);
-      setTimerSeconds(Math.floor((now - midnight) / 1000));
-    }
-    tick();
-    const id = setInterval(tick, 1000);
+    const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
 
@@ -111,7 +105,7 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
   async function loadAll() {
     setLoading(true);
     try {
-      const [myRules, partnershipsResult, declList] = await Promise.all([
+      const [myRules, partnershipsResult, declList, lastSlipResult] = await Promise.all([
         api.entities.Rule.filter({ user_id: currentUser.id }),
         supabase
           .from('partnerships')
@@ -119,7 +113,14 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
           .or(`user_a_id.eq.${currentUser.id},user_b_id.eq.${currentUser.id}`)
           .neq('status', 'dissolved'),
         api.entities.SummertidesDeclaration.filter({ user_id: currentUser.id, year: today.getFullYear() }),
+        supabase
+          .from('slips')
+          .select('created_at')
+          .eq('user_id', currentUser.id)
+          .order('created_at', { ascending: false })
+          .limit(1),
       ]);
+      setLastSlipAt(lastSlipResult.data?.[0]?.created_at ?? null);
 
       setRules(myRules.filter(r => r.active));
       setSummertidesDecl(declList[0] || null);
@@ -201,12 +202,19 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
     setShowSummertides(false);
   }
 
-  const overallStreak = rules.length > 0 ? Math.min(...rules.map(r => r.current_streak || 0)) : 0;
   const activePartners = partnerships.filter(p => p.status === 'active');
   const computedVibeScore = computeVibeScore(rules, activePartners.length);
-  const timerH = String(Math.floor(timerSeconds / 3600)).padStart(2, '0');
-  const timerM = String(Math.floor((timerSeconds % 3600) / 60)).padStart(2, '0');
-  const timerS = String(timerSeconds % 60).padStart(2, '0');
+  const hasActivePartnership = activePartners.length > 0;
+  const oldestActivePartnership = [...activePartners].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))[0];
+  const timerStart = hasActivePartnership
+    ? (lastSlipAt ? new Date(lastSlipAt) : (oldestActivePartnership ? new Date(oldestActivePartnership.created_at) : null))
+    : null;
+  const totalTimerSeconds = timerStart ? Math.max(0, Math.floor((now - timerStart) / 1000)) : 0;
+  const overallStreak = Math.floor(totalTimerSeconds / 86400);
+  const daySeconds = totalTimerSeconds % 86400;
+  const timerH = String(Math.floor(daySeconds / 3600)).padStart(2, '0');
+  const timerM = String(Math.floor((daySeconds % 3600) / 60)).padStart(2, '0');
+  const timerS = String(daySeconds % 60).padStart(2, '0');
   const timerDisplay = `${timerH}:${timerM}:${timerS}`;
   const negotiatingPartners = partnerships.filter(p => p.status === 'negotiating');
   const totalPartners = activePartners.length + negotiatingPartners.length;
@@ -556,6 +564,7 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
           activePartnerships={[...activePartners, ...negotiatingPartners]}
           partnerIds={partnerUserIds}
           onOptimisticSlip={(ruleId) => {
+            setLastSlipAt(new Date().toISOString());
             setRules(prev => prev.map(r =>
               r.id === ruleId ? { ...r, current_streak: 0 } : r
             ));
