@@ -64,12 +64,12 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
       setNotifications(notifs.map(n => ({ ...n, read: true })));
       setPendingSlips(slips);
 
-      // Fire-and-forget: mark read in background so the panel feels instant
       if (unreadIds.length > 0) {
         supabase
           .from('notifications')
           .update({ read: true })
-          .in('id', unreadIds);
+          .in('id', unreadIds)
+          .then(({ error }) => { if (error) console.error('mark-read failed:', error.message); });
       }
     } catch (err) {
       console.error('Failed to load notifications:', err?.message || err);

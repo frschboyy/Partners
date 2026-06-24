@@ -129,14 +129,22 @@ function MainApp({ user }) {
   }
 
   async function checkNotifications() {
-    const [notifs, pendingSlips] = await Promise.all([
+    const [notifs, pendingSlips, activePs] = await Promise.all([
       api.entities.Notification.filter({ user_id: user.id, read: false }),
       api.entities.Slip.filter({ user_id: user.id, status: 'pending' }),
+      supabase
+        .from('partnerships')
+        .select('id')
+        .or(`user_a_id.eq.${user.id},user_b_id.eq.${user.id}`)
+        .eq('status', 'active'),
     ]);
+    const activePIds = new Set((activePs.data || []).map(p => p.id));
+    // Only count slips from active partnerships — dissolved partnerships leave orphaned pending slips
+    const actionableSlips = pendingSlips.filter(s => activePIds.has(s.partnership_id));
     const needsPassword =
       !user.identities?.some(i => i.provider === 'email') &&
       !user.user_metadata?.has_set_password;
-    setUnreadNotifications(notifs.length + pendingSlips.length + (needsPassword ? 1 : 0));
+    setUnreadNotifications(notifs.length + actionableSlips.length + (needsPassword ? 1 : 0));
   }
 
   async function checkUnread() {
@@ -162,15 +170,30 @@ function MainApp({ user }) {
         return;
       }
 
-      // Fallback: single batch query — still far better than N+1
-      const { data: msgs } = await supabase
-        .from('chat_messages')
-        .select('read_by')
-        .in('partnership_id', ids)
-        .eq('is_deleted', false)
-        .neq('sender_id', user.id);
+      // Fallback: use partnership_read_positions (same source Chat uses to mark read)
+      const [posResult, msgsResult] = await Promise.all([
+        supabase
+          .from('partnership_read_positions')
+          .select('partnership_id, last_read_at')
+          .eq('user_id', user.id)
+          .in('partnership_id', ids),
+        supabase
+          .from('chat_messages')
+          .select('partnership_id, created_at')
+          .in('partnership_id', ids)
+          .eq('is_deleted', false)
+          .neq('sender_id', user.id),
+      ]);
 
-      setUnreadMessages((msgs || []).filter(m => !m.read_by?.includes(user.id)).length);
+      const posMap = {};
+      (posResult.data || []).forEach(p => { posMap[p.partnership_id] = p.last_read_at; });
+
+      const unread = (msgsResult.data || []).filter(m => {
+        const lastRead = posMap[m.partnership_id];
+        return !lastRead || m.created_at > lastRead;
+      }).length;
+
+      setUnreadMessages(unread);
     } catch (err) {
       console.error('checkUnread failed:', err?.message || err);
     }
