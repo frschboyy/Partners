@@ -113,6 +113,7 @@ export default function Onboarding({ user, onComplete }) {
   }
 
   return (
+    <>
     <div className="min-h-screen flex flex-col bg-background" style={{ background: 'hsl(var(--background))' }}>
       {/* Progress bar */}
       <div className="h-1 bg-secondary">
@@ -346,5 +347,6 @@ export default function Onboarding({ user, onComplete }) {
         <MilestoneModal type="onboarding_complete" onDismiss={() => onComplete(completedProfile)} />
       )}
     </AnimatePresence>
+    </>
   );
 }
