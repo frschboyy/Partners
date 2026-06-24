@@ -1,5 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Compass, Flame, Star, ChevronDown, UserX, Eye, AlertTriangle, Search } from 'lucide-react';
+
+function computeVibeScore(rules, activePartnersCount) {
+  if (rules.length === 0) return 0.0;
+  const overallStreak = Math.min(...rules.map(r => r.current_streak || 0));
+  const streakPts = Math.min(overallStreak / 14, 1) * 4;
+  const ratioSum = rules.reduce((sum, r) => {
+    if (!r.longest_streak) return sum;
+    return sum + Math.min((r.current_streak || 0) / r.longest_streak, 1);
+  }, 0);
+  const ratioPts = (ratioSum / rules.length) * 3;
+  const rulePts = Math.min(rules.length / 5, 1) * 1;
+  const partnerPts = Math.min(activePartnersCount, 2) * 1;
+  return Math.round(Math.min(streakPts + ratioPts + rulePts + partnerPts, 10) * 10) / 10;
+}
 import { useToast, Toast } from '@/components/Toast';
 import PartnershipFinancials from '@/components/PartnershipFinancials';
 import { api, supabase } from '@/api/supabaseClient';
@@ -39,6 +53,19 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
   const [showSummertides, setShowSummertides] = useState(false);
   const partnersRef = useRef(null);
   const [partnerSearch, setPartnerSearch] = useState('');
+
+  const [timerSeconds, setTimerSeconds] = useState(0);
+  useEffect(() => {
+    function tick() {
+      const now = new Date();
+      const midnight = new Date(now);
+      midnight.setHours(0, 0, 0, 0);
+      setTimerSeconds(Math.floor((now - midnight) / 1000));
+    }
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
 
   const today = new Date();
   const isSummertidesWindow = today.getMonth() === SUMMERTIDES.month &&
@@ -110,6 +137,12 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
         profileRows?.forEach(pr => { byUserId[pr.user_id] = pr; });
         setPartnerProfiles(byUserId);
       }
+
+      // Persist computed vibe score — fire-and-forget
+      const activeCount = myParties.filter(p => p.status === 'active').length;
+      const activeRules = myRules.filter(r => r.active);
+      const newVibeScore = computeVibeScore(activeRules, activeCount);
+      supabase.from('user_profiles').update({ vibe_score: newVibeScore }).eq('user_id', currentUser.id);
     } catch (err) {
       console.error('Failed to load dashboard:', err?.message || err);
       showHomeToast('Failed to load data — please refresh');
@@ -169,8 +202,12 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
   }
 
   const overallStreak = rules.length > 0 ? Math.min(...rules.map(r => r.current_streak || 0)) : 0;
-  const vibeScore = profile?.vibe_score || 0;
   const activePartners = partnerships.filter(p => p.status === 'active');
+  const computedVibeScore = computeVibeScore(rules, activePartners.length);
+  const timerH = String(Math.floor(timerSeconds / 3600)).padStart(2, '0');
+  const timerM = String(Math.floor((timerSeconds % 3600) / 60)).padStart(2, '0');
+  const timerS = String(timerSeconds % 60).padStart(2, '0');
+  const timerDisplay = `${timerH}:${timerM}:${timerS}`;
   const negotiatingPartners = partnerships.filter(p => p.status === 'negotiating');
   const totalPartners = activePartners.length + negotiatingPartners.length;
   const searchQuery = partnerSearch.trim().toLowerCase();
@@ -200,16 +237,17 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
           <Avatar profile={profile} size="md" />
         </div>
 
-        {/* Stats strip — tapping a number makes it editable, but trying to change it summons the guard */}
+        {/* Stats strip */}
         <div className="grid grid-cols-2 gap-3">
-          <div className="card-brutal p-3 flex flex-col items-center gap-1">
-            <div className="flex items-center gap-1">
-              <Flame size={16} style={{ color: 'hsl(var(--theme-accent))' }} />
+          {/* Streak + live timer */}
+          <div className="card-brutal p-3 flex flex-col items-center gap-0.5">
+            <div className="flex items-baseline gap-1">
+              <Flame size={15} style={{ color: 'hsl(var(--theme-accent))' }} />
               {editingStat === 'streak' ? (
                 <input
                   autoFocus
                   type="number"
-                  className="text-2xl font-bold font-display-mono w-16 text-center bg-transparent border-b-2 border-primary outline-none"
+                  className="text-2xl font-bold font-display-mono w-14 text-center bg-transparent border-b-2 border-primary outline-none"
                   style={{ color: 'hsl(var(--theme-accent))' }}
                   value={editValue}
                   onChange={e => setEditValue(e.target.value)}
@@ -218,7 +256,7 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
                     if (parseInt(editValue, 10) !== overallStreak) setShowGuard(true);
                   }}
                   onKeyDown={e => {
-                    if (e.key === 'Enter') { e.target.blur(); }
+                    if (e.key === 'Enter') e.target.blur();
                     if (e.key === 'Escape') setEditingStat(null);
                   }}
                 />
@@ -231,40 +269,28 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
                   {overallStreak}
                 </span>
               )}
+              <span className="text-sm font-semibold text-muted-foreground">d</span>
             </div>
-            <span className="text-xs text-muted-foreground text-center">day streak</span>
+            <span
+              className="text-[11px] font-mono tracking-tight tabular-nums"
+              style={{ color: 'hsl(var(--theme-accent) / 0.75)' }}
+            >
+              {timerDisplay}
+            </span>
+            <span className="text-[10px] text-muted-foreground">day streak</span>
           </div>
-          <div className="card-brutal p-3 flex flex-col items-center gap-1">
-            <div className="flex items-center gap-1">
-              <Star size={16} style={{ color: 'hsl(var(--theme-accent))' }} />
-              {editingStat === 'vibe' ? (
-                <input
-                  autoFocus
-                  type="number"
-                  className="text-2xl font-bold font-display-mono w-16 text-center bg-transparent border-b-2 border-primary outline-none"
-                  style={{ color: 'hsl(var(--theme-accent))' }}
-                  value={editValue}
-                  onChange={e => setEditValue(e.target.value)}
-                  onBlur={() => {
-                    setEditingStat(null);
-                    if (parseInt(editValue, 10) !== vibeScore) setShowGuard(true);
-                  }}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') { e.target.blur(); }
-                    if (e.key === 'Escape') setEditingStat(null);
-                  }}
-                />
-              ) : (
-                <span
-                  className="text-2xl font-bold font-display-mono cursor-pointer"
-                  style={{ color: 'hsl(var(--theme-accent))' }}
-                  onClick={() => { setEditingStat('vibe'); setEditValue(String(vibeScore)); }}
-                >
-                  {vibeScore}
-                </span>
-              )}
+
+          {/* Vibe score — computed, not editable */}
+          <div className="card-brutal p-3 flex flex-col items-center gap-0.5">
+            <div className="flex items-baseline gap-1">
+              <Star size={15} style={{ color: 'hsl(var(--theme-accent))' }} />
+              <span className="text-2xl font-bold font-display-mono" style={{ color: 'hsl(var(--theme-accent))' }}>
+                {computedVibeScore.toFixed(1)}
+              </span>
+              <span className="text-xs text-muted-foreground">/10</span>
             </div>
-            <span className="text-xs text-muted-foreground text-center">vibe score</span>
+            <span className="text-[11px] text-muted-foreground/50 tracking-tight">streak · rules · partners</span>
+            <span className="text-[10px] text-muted-foreground">vibe score</span>
           </div>
         </div>
 
