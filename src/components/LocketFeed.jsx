@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from 'framer-motion';
-import { ChevronUp } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import FeedPost from '@/components/FeedPost';
 
 const DRAG_THRESHOLD = 80;
@@ -27,7 +27,7 @@ export default function LocketFeed({
 
   useEffect(() => {
     if (!showSwipeHint) return;
-    const t = setTimeout(() => setShowSwipeHint(false), 3500);
+    const t = setTimeout(() => setShowSwipeHint(false), 5000);
     return () => clearTimeout(t);
   }, [showSwipeHint]);
 
@@ -125,22 +125,26 @@ export default function LocketFeed({
         </div>
       )}
 
-      {/* Swipe-up hint — shown once on first load, dismissed on drag or after 3.5s */}
+      {/* Scroll hint — overlays the bottom of the card so it's always visible */}
       <AnimatePresence>
         {showSwipeHint && nextPost && (
           <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: [0, -6, 0] }}
-            exit={{ opacity: 0, y: 4 }}
+            key="swipe-hint"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: [0, -5, 0] }}
+            exit={{ opacity: 0 }}
             transition={{
-              opacity: { duration: 0.4 },
-              y: { repeat: Infinity, duration: 1.3, ease: 'easeInOut' },
-              exit: { duration: 0.25 },
+              opacity: { duration: 0.35 },
+              y: { repeat: Infinity, duration: 1.2, ease: 'easeInOut' },
+              exit: { duration: 0.2 },
             }}
-            className="absolute bottom-6 left-0 right-0 flex flex-col items-center gap-0.5 pointer-events-none z-20"
+            className="absolute left-0 right-0 flex justify-center pointer-events-none z-20"
+            style={{ bottom: `calc(50% - ${POST_HEIGHT_VH / 2}vh - 32px + 52px)` }}
           >
-            <ChevronUp size={18} className="text-white/80 drop-shadow" />
-            <p className="text-xs font-semibold text-white/80 drop-shadow">Swipe up for more</p>
+            <div className="flex flex-col items-center gap-0.5 bg-black/50 backdrop-blur-sm px-3 py-1.5 rounded-full">
+              <ChevronDown size={15} className="text-white" />
+              <p className="text-[11px] font-semibold text-white leading-none">more below</p>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
