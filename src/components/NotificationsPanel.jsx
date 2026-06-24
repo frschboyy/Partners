@@ -326,7 +326,7 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
                   whileTap={{ scale: 0.97 }}
                   className={cls}
                   onClick={() => {
-                    supabase.from('notifications').update({ actioned: true }).eq('id', n.id);
+                    supabase.from('notifications').update({ actioned: true }).eq('id', n.id).then(() => {});
                     onNavigate(action.tab, action.intent);
                   }}
                 >
