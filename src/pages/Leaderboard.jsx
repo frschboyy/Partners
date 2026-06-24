@@ -230,7 +230,7 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1.5 px-4 mb-4 overflow-x-auto pb-1 scrollbar-none">
+      <div data-no-swipe-nav className="flex gap-1.5 px-4 mb-4 overflow-x-auto pb-1 scrollbar-none">
         {tabs.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
