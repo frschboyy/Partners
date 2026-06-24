@@ -327,8 +327,7 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
                   className={cls}
                   onClick={async () => {
                     setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, actioned: true } : x));
-                    supabase.from('notifications').update({ actioned: true }).eq('id', n.id);
-                    await new Promise(r => setTimeout(r, 380));
+                    await supabase.from('notifications').update({ actioned: true }).eq('id', n.id);
                     onNavigate(action.tab, action.intent);
                   }}
                 >
