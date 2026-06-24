@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '@/api/supabaseClient';
 import { Trophy, Flame, Camera, Dumbbell, Crown, AlertCircle, Users, Banknote } from 'lucide-react';
 import Avatar from '@/components/Avatar';
@@ -8,6 +8,9 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('streak');
+  const tabBarRef = useRef(null);
+  const swipeStartX = useRef(null);
+  const swipeStartY = useRef(null);
 
   const currencyLabel = profile?.currency_label || 'KSH';
 
@@ -219,8 +222,30 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
     return 'hsl(var(--theme-accent))';
   }
 
+  function handleTouchStart(e) {
+    if (tabBarRef.current?.contains(e.target)) return;
+    swipeStartX.current = e.touches[0].clientX;
+    swipeStartY.current = e.touches[0].clientY;
+  }
+
+  function handleTouchEnd(e) {
+    if (swipeStartX.current === null) return;
+    const dx = e.changedTouches[0].clientX - swipeStartX.current;
+    const dy = e.changedTouches[0].clientY - swipeStartY.current;
+    swipeStartX.current = null;
+    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    const idx = tabs.findIndex(t => t.id === activeTab);
+    if (dx < 0 && idx < tabs.length - 1) setActiveTab(tabs[idx + 1].id);
+    else if (dx > 0 && idx > 0) setActiveTab(tabs[idx - 1].id);
+  }
+
   return (
-    <div className="flex flex-col h-full bg-background">
+    <div
+      className="flex flex-col h-full bg-background"
+      data-no-swipe-nav
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+    >
       <div className="px-4 pt-6 pb-4">
         <div className="flex items-center gap-2">
           <Trophy size={22} style={{ color: 'hsl(var(--theme-accent))' }} />
@@ -230,7 +255,7 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
       </div>
 
       {/* Tabs */}
-      <div data-no-swipe-nav className="flex gap-1.5 px-4 mb-4 overflow-x-auto pb-1 scrollbar-none">
+      <div ref={tabBarRef} className="flex gap-1.5 px-4 mb-4 overflow-x-auto pb-1 scrollbar-none">
         {tabs.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
