@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { api, supabase } from '@/api/supabaseClient';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Moon, Sun, Camera, LogOut, Check, Eye, EyeOff, Lock, ChevronDown, Trash2 } from 'lucide-react';
-import { THEMES, applyTheme, saveTheme, FONT_SIZES, applyFontSize, getSavedFontSize, saveFontSize } from '@/lib/theme';
+import { THEMES, applyTheme, saveTheme, FONT_SIZES, applyFontSize, getSavedFontSize, saveFontSize, applyCustomHue, saveCustomHue, getSavedCustomHue } from '@/lib/theme';
 import Avatar from '@/components/Avatar';
 import { useToast, Toast } from '@/components/Toast';
 import { useAuth } from '@/lib/AuthContext';
@@ -36,6 +36,7 @@ export default function Settings({ currentUser, profile, onProfileUpdate, curren
   const [pendingFontSize, setPendingFontSize] = useState(() => getSavedFontSize());
   const [showColorTheme, setShowColorTheme] = useState(false);
   const [showTextSize, setShowTextSize] = useState(false);
+  const [customHue, setCustomHue] = useState(() => getSavedCustomHue());
   const passwordRef = useRef(null);
 
   useEffect(() => {
@@ -180,6 +181,16 @@ export default function Settings({ currentUser, profile, onProfileUpdate, curren
     }
   }
 
+  function handleCustomHueChange(hue) {
+    setCustomHue(hue);
+    saveCustomHue(hue);
+    applyCustomHue(hue, darkMode);
+    if (currentTheme !== 'custom') {
+      onThemeChange('custom');
+      saveTheme('custom', darkMode);
+    }
+  }
+
   return (
     <div className="flex flex-col min-h-screen bg-background pb-24">
       <Toast message={toastMessage} variant={toastVariant} position="top" />
@@ -309,6 +320,51 @@ export default function Settings({ currentUser, profile, onProfileUpdate, curren
                   )}
                 </motion.button>
               ))}
+
+              {/* Custom hue row */}
+              <motion.button
+                whileTap={{ scale: 0.97 }}
+                onClick={() => handleCustomHueChange(customHue)}
+                className="w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-all"
+                style={currentTheme === 'custom'
+                  ? { background: 'hsl(var(--theme-accent-muted))', borderColor: 'hsl(var(--theme-accent))' }
+                  : { background: 'hsl(var(--secondary))', borderColor: 'hsl(var(--border))' }}
+              >
+                <div
+                  className="w-8 h-8 rounded-full flex-shrink-0 border border-border"
+                  style={{ background: `hsl(${customHue}, 80%, 55%)` }}
+                />
+                <div className="flex-1">
+                  <p className="font-semibold text-sm">Custom</p>
+                  <p className="text-xs text-muted-foreground">Pick your own color</p>
+                </div>
+                {currentTheme === 'custom' && (
+                  <Check size={16} style={{ color: 'hsl(var(--theme-accent))' }} />
+                )}
+              </motion.button>
+
+              {/* Hue slider — shown when custom is active */}
+              {currentTheme === 'custom' && (
+                <div className="px-1 pt-1 space-y-2">
+                  <div className="relative h-5 rounded-full overflow-hidden"
+                    style={{ background: 'linear-gradient(to right, hsl(0,90%,57%), hsl(60,90%,57%), hsl(120,90%,57%), hsl(180,90%,57%), hsl(240,90%,57%), hsl(300,90%,57%), hsl(360,90%,57%))' }}
+                  >
+                    {/* Thumb indicator */}
+                    <div
+                      className="absolute top-0 bottom-0 w-1 bg-white rounded-full shadow-md pointer-events-none"
+                      style={{ left: `calc(${(customHue / 360) * 100}% - 2px)` }}
+                    />
+                    <input
+                      type="range"
+                      min={0}
+                      max={360}
+                      value={customHue}
+                      onChange={e => handleCustomHueChange(Number(e.target.value))}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
