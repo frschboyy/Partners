@@ -23,6 +23,8 @@ function getAction(n) {
     case 'balance_settled':
     case 'balance_denied':
       return { label: 'View financials', tab: 'home', intent: { action: 'viewPartners' } };
+    case 'partnership_declined':
+      return { label: 'View partners', tab: 'home', intent: { action: 'viewPartners' } };
     case 'new_message':
       return { label: 'Open chat', tab: 'chat', intent: { action: 'openChat', fromUserId: n.from_user_id } };
     case 'summertides_declared':
@@ -159,6 +161,7 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
     partner_removed: '👋',
     balance_settled: '✅',
     balance_denied: '❌',
+    partnership_declined: '❌',
   };
 
   const selfIcons = {

@@ -1,10 +1,10 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
-import { api } from '@/api/supabaseClient';
+import { api, supabase } from '@/api/supabaseClient';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { UserPlus, Mail, Lock, Loader2, Eye, EyeOff } from "lucide-react";
+import { UserPlus, Mail, Lock, Loader2, Eye, EyeOff, MailCheck, RefreshCw } from "lucide-react";
 import AuthLayout from "@/components/AuthLayout";
 import GoogleIcon from "@/components/GoogleIcon";
 
@@ -16,6 +16,9 @@ export default function Register() {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [registered, setRegistered] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [resent, setResent] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -27,8 +30,7 @@ export default function Register() {
     setLoading(true);
     try {
       await api.auth.register({ email, password });
-      // After registering, redirect to login for user to sign in
-      window.location.href = '/login';
+      setRegistered(true);
     } catch (err) {
       if (err.status === 429 || err.message?.toLowerCase().includes('rate limit')) {
         setError("Too many sign-up attempts. Please wait a few minutes and try again.");
@@ -40,9 +42,73 @@ export default function Register() {
     }
   };
 
+  async function handleResend() {
+    setResending(true);
+    setResent(false);
+    try {
+      await supabase.auth.resend({ type: 'signup', email });
+      setResent(true);
+    } catch {
+      // silently fail — user can try again
+    } finally {
+      setResending(false);
+    }
+  }
+
   const handleGoogle = () => {
     api.auth.loginWithProvider("google");
   };
+
+  if (registered) {
+    return (
+      <AuthLayout
+        icon={MailCheck}
+        title="Check your email"
+        subtitle={`We sent a confirmation link to ${email}`}
+        footer={
+          <>
+            Wrong address?{" "}
+            <button
+              onClick={() => { setRegistered(false); setResent(false); }}
+              className="text-primary font-medium hover:underline"
+            >
+              Go back
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-5">
+          <div className="rounded-xl border border-border bg-secondary/50 p-5 text-center space-y-2">
+            <p className="text-4xl">📬</p>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              Open the link in the email to activate your account. Check your spam folder if you don't see it within a minute.
+            </p>
+          </div>
+
+          <Button
+            variant="outline"
+            className="w-full h-11 text-sm font-medium"
+            onClick={handleResend}
+            disabled={resending || resent}
+          >
+            {resending ? (
+              <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Sending…</>
+            ) : resent ? (
+              <><RefreshCw className="w-4 h-4 mr-2" /> Sent! Check your inbox</>
+            ) : (
+              <><RefreshCw className="w-4 h-4 mr-2" /> Resend confirmation email</>
+            )}
+          </Button>
+
+          <div className="text-center">
+            <Link to="/login" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+              Already confirmed? <span className="text-primary font-medium">Sign in →</span>
+            </Link>
+          </div>
+        </div>
+      </AuthLayout>
+    );
+  }
 
   return (
     <AuthLayout

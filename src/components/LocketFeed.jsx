@@ -1,5 +1,6 @@
-import React, { useState, useRef, useCallback } from 'react';
-import { motion, useMotionValue, useTransform, animate } from 'framer-motion';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { motion, AnimatePresence, useMotionValue, useTransform, animate } from 'framer-motion';
+import { ChevronUp } from 'lucide-react';
 import FeedPost from '@/components/FeedPost';
 
 const DRAG_THRESHOLD = 80;
@@ -20,8 +21,15 @@ export default function LocketFeed({
   emptyEmoji = '📭',
 }) {
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [showSwipeHint, setShowSwipeHint] = useState(posts.length > 1);
   const y = useMotionValue(0);
   const transitioning = useRef(false);
+
+  useEffect(() => {
+    if (!showSwipeHint) return;
+    const t = setTimeout(() => setShowSwipeHint(false), 3500);
+    return () => clearTimeout(t);
+  }, [showSwipeHint]);
 
   // Adjacent card previews track the drag so they peek in as the user swipes
   const prevCardY = useTransform(y, v => v - OFFSCREEN_PY());
@@ -108,6 +116,35 @@ export default function LocketFeed({
   return (
     <div className="relative w-full h-full overflow-hidden select-none">
 
+      {/* Post counter */}
+      {posts.length > 1 && (
+        <div className="absolute top-3 right-5 z-20 bg-black/40 backdrop-blur-sm px-2.5 py-1 rounded-full pointer-events-none">
+          <p className="text-[11px] font-semibold text-white tabular-nums">
+            {currentIndex + 1} / {posts.length}
+          </p>
+        </div>
+      )}
+
+      {/* Swipe-up hint — shown once on first load, dismissed on drag or after 3.5s */}
+      <AnimatePresence>
+        {showSwipeHint && nextPost && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: [0, -6, 0] }}
+            exit={{ opacity: 0, y: 4 }}
+            transition={{
+              opacity: { duration: 0.4 },
+              y: { repeat: Infinity, duration: 1.3, ease: 'easeInOut' },
+              exit: { duration: 0.25 },
+            }}
+            className="absolute bottom-6 left-0 right-0 flex flex-col items-center gap-0.5 pointer-events-none z-20"
+          >
+            <ChevronUp size={18} className="text-white/80 drop-shadow" />
+            <p className="text-xs font-semibold text-white/80 drop-shadow">Swipe up for more</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Card above — slides in on downward swipe */}
       {prevPost && (
         <motion.div
@@ -144,6 +181,7 @@ export default function LocketFeed({
         dragConstraints={{ top: 0, bottom: 0 }}
         dragElastic={1}
         onDragEnd={(_, info) => {
+          setShowSwipeHint(false);
           if (info.offset.y < -DRAG_THRESHOLD) goNext();
           else if (info.offset.y > DRAG_THRESHOLD) goPrev();
           else animate(y, 0, { type: 'spring', stiffness: 400, damping: 40 });

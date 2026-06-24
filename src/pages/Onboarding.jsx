@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { api, supabase } from '@/api/supabaseClient';
 import { GOAL_OPTIONS } from '@/lib/goals';
 import { PREDEFINED_RULES } from '@/lib/rules';
-import { Camera } from 'lucide-react';
+import { Camera, Mail } from 'lucide-react';
 import MilestoneModal from '@/components/MilestoneModal';
 
 const EMOJIS = ['😎', '💪', '🔥', '🦁', '🐺', '⚡', '🌊', '🎯', '🚀', '👑', '🦋', '🌟'];
@@ -22,13 +22,18 @@ export default function Onboarding({ user, onComplete }) {
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoError, setPhotoError] = useState('');
   const [completedProfile, setCompletedProfile] = useState(null);
+  const [resendingEmail, setResendingEmail] = useState(false);
+  const [emailResent, setEmailResent] = useState(false);
   const fileInputRef = useRef(null);
 
+  const isEmailUser = user?.identities?.some(i => i.provider === 'email');
+  const isEmailUnverified = isEmailUser && !user?.email_confirmed_at;
+
   const steps = [
-    { title: 'Who are you?', subtitle: 'Set up your identity' },
-    { title: 'Your vibe', subtitle: 'Pick your avatar' },
-    { title: 'Your mission', subtitle: 'What are you working on?' },
-    { title: 'Your rules', subtitle: 'Set your NOs' },
+    { title: 'Who are you?',   subtitle: 'Set up your identity' },
+    { title: 'Your vibe',      subtitle: 'Pick your avatar' },
+    { title: 'Your mission',   subtitle: 'What are you working on?' },
+    { title: 'Your rules',     subtitle: 'Set your NOs' },
   ];
 
   function toggleGoal(category) {
@@ -65,6 +70,17 @@ export default function Onboarding({ user, onComplete }) {
       setPhotoUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
+  }
+
+  async function handleResendEmail() {
+    setResendingEmail(true);
+    try {
+      await supabase.auth.resend({ type: 'signup', email: user.email });
+      setEmailResent(true);
+    } catch {
+      // Silently fail — resend is best-effort
+    }
+    setResendingEmail(false);
   }
 
   async function finish() {
@@ -112,6 +128,42 @@ export default function Onboarding({ user, onComplete }) {
     }
   }
 
+  async function handleSkip() {
+    setSaving(true);
+    setSaveError('');
+    try {
+      const fallbackName = displayName.trim() || user?.email?.split('@')[0] || 'Explorer';
+      const { data: profile, error } = await supabase
+        .from('user_profiles')
+        .upsert({
+          user_id: user.id,
+          display_name: fallbackName,
+          emoji_avatar: emoji,
+          photo_avatar_url: photoUrl,
+          avatar_mode: photoUrl ? 'flip' : 'emoji',
+          goals: selectedGoals,
+          onboarding_complete: true,
+          vibe_score: 0,
+          total_owed: 0,
+          dark_mode: true,
+          theme: 'lime',
+        }, { onConflict: 'user_id' })
+        .select()
+        .single();
+      if (error) throw error;
+      onComplete(profile);
+    } catch (err) {
+      setSaveError(err.message || 'Something went wrong — please try again');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const goalSummary = selectedGoals.map(cat => {
+    const g = GOAL_OPTIONS.find(x => x.category === cat);
+    return g ? `${g.emoji} ${g.label}` : cat;
+  });
+
   return (
     <>
     <div className="min-h-screen flex flex-col bg-background" style={{ background: 'hsl(var(--background))' }}>
@@ -146,6 +198,30 @@ export default function Onboarding({ user, onComplete }) {
             {/* Step 0: Name */}
             {step === 0 && (
               <div className="space-y-4">
+                {/* Email verification nudge */}
+                {isEmailUnverified && (
+                  <div className="flex items-start gap-3 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/30">
+                    <Mail size={16} className="text-yellow-500 mt-0.5 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-yellow-600 dark:text-yellow-400">Verify your email</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Check your inbox for a verification link. You'll need a verified email to use partner discovery.
+                      </p>
+                      {!emailResent ? (
+                        <button
+                          onClick={handleResendEmail}
+                          disabled={resendingEmail}
+                          className="text-xs font-semibold text-yellow-600 dark:text-yellow-400 mt-1 disabled:opacity-50"
+                        >
+                          {resendingEmail ? 'Sending…' : 'Resend email →'}
+                        </button>
+                      ) : (
+                        <p className="text-xs font-semibold text-yellow-600 dark:text-yellow-400 mt-1">Sent! Check your inbox ✓</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div>
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">Display name</label>
                   <input
@@ -191,14 +267,19 @@ export default function Onboarding({ user, onComplete }) {
                       </div>
                     </div>
                   ) : (
-                    <button
-                      onClick={() => !photoUploading && fileInputRef.current?.click()}
-                      disabled={photoUploading}
-                      className="flex items-center gap-3 px-4 py-3 rounded-xl border border-dashed border-border text-muted-foreground disabled:opacity-60"
-                    >
-                      <Camera size={20} />
-                      <span className="text-sm">{photoUploading ? 'Uploading…' : 'Upload photo'}</span>
-                    </button>
+                    <div className="space-y-2">
+                      <button
+                        onClick={() => !photoUploading && fileInputRef.current?.click()}
+                        disabled={photoUploading}
+                        className="flex items-center gap-3 px-4 py-3 rounded-xl border border-dashed border-border text-muted-foreground disabled:opacity-60"
+                      >
+                        <Camera size={20} />
+                        <span className="text-sm">{photoUploading ? 'Uploading…' : 'Upload photo'}</span>
+                      </button>
+                      <p className="text-xs text-muted-foreground pl-1">
+                        Your selected emoji will be used if you skip this — you can always add a photo later in Settings.
+                      </p>
+                    </div>
                   )}
                   {photoError && <p className="text-xs text-destructive mt-2">{photoError}</p>}
                   <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
@@ -249,7 +330,16 @@ export default function Onboarding({ user, onComplete }) {
             {/* Step 3: Rules */}
             {step === 3 && (
               <div className="space-y-4">
-                <p className="text-sm text-muted-foreground">Add your personal NOs. You can edit these any time from your Home screen.</p>
+                {/* What rules do explainer */}
+                <div className="rounded-xl border border-border bg-secondary/50 p-3 space-y-2">
+                  <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">How rules work</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Each rule starts a streak counter. Breaking a rule resets it to zero and triggers a penalty if you have an active partnership. Self-reported slips cost 50% of the agreed penalty — witnessed slips cost 100%.
+                  </p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    🤝 <span className="font-semibold text-foreground">What's a partner?</span> After setup, you'll invite someone to hold you accountable. They can report your slips, and you theirs — with financial consequences you both agree on upfront.
+                  </p>
+                </div>
 
                 {rules.length > 0 && (
                   <div className="space-y-2">
@@ -296,6 +386,7 @@ export default function Onboarding({ user, onComplete }) {
                     )}
                   </AnimatePresence>
                 </div>
+                <p className="text-xs text-muted-foreground">You can add or remove rules any time from the Home tab.</p>
               </div>
             )}
           </motion.div>
@@ -307,7 +398,7 @@ export default function Onboarding({ user, onComplete }) {
             {saveError}
           </div>
         )}
-        <div className="flex gap-3 mt-4 pb-8">
+        <div className="flex gap-3 mt-4">
           {step > 0 && (
             <motion.button
               whileTap={{ scale: 0.92, opacity: 0.7 }}
@@ -339,12 +430,33 @@ export default function Onboarding({ user, onComplete }) {
             </motion.button>
           )}
         </div>
+
+        {/* Skip option */}
+        <div className="flex justify-center mt-4 pb-8">
+          <button
+            onClick={handleSkip}
+            disabled={saving}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
+          >
+            Skip setup, explore first →
+          </button>
+        </div>
       </div>
     </div>
 
     <AnimatePresence>
       {completedProfile && (
-        <MilestoneModal type="onboarding_complete" onDismiss={() => onComplete(completedProfile)} />
+        <MilestoneModal
+          type="onboarding_complete"
+          onDismiss={() => onComplete(completedProfile)}
+          summary={{
+            displayName: completedProfile.display_name,
+            emoji: completedProfile.emoji_avatar,
+            photoUrl: completedProfile.photo_avatar_url,
+            goals: goalSummary,
+            rulesCount: rules.length,
+          }}
+        />
       )}
     </AnimatePresence>
     </>

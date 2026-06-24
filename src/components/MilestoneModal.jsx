@@ -15,15 +15,16 @@ const MILESTONES = {
   onboarding_complete: {
     emoji: '🚀',
     title: "You're all set!",
-    body: "Your profile is ready. Now go find a partner and get to work.",
+    body: "Your profile is ready. Here's what you configured:",
   },
 };
 
-export default function MilestoneModal({ type, onDismiss }) {
+export default function MilestoneModal({ type, onDismiss, summary }) {
   const m = MILESTONES[type];
+  const dismissDelay = summary ? 8000 : 5000;
 
   useEffect(() => {
-    const t = setTimeout(onDismiss, 5000);
+    const t = setTimeout(onDismiss, dismissDelay);
     return () => clearTimeout(t);
   }, []);
 
@@ -31,7 +32,7 @@ export default function MilestoneModal({ type, onDismiss }) {
 
   return (
     <motion.div
-      className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-black/85 overflow-hidden"
+      className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-black/85 overflow-hidden px-5"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -56,7 +57,7 @@ export default function MilestoneModal({ type, onDismiss }) {
       ))}
 
       <motion.div
-        className="bg-card rounded-3xl p-8 mx-6 text-center space-y-4 shadow-2xl border border-border"
+        className="bg-card rounded-3xl p-6 w-full max-w-sm text-center space-y-4 shadow-2xl border border-border"
         initial={{ scale: 0.65, opacity: 0, y: 48 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.88, opacity: 0 }}
@@ -72,6 +73,58 @@ export default function MilestoneModal({ type, onDismiss }) {
         </motion.div>
         <h2 className="text-2xl font-black">{m.title}</h2>
         <p className="text-sm text-muted-foreground leading-relaxed">{m.body}</p>
+
+        {/* Setup summary */}
+        {summary && (
+          <div className="space-y-2 text-left">
+            {/* Identity */}
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-secondary">
+              {summary.photoUrl ? (
+                <img src={summary.photoUrl} alt="" className="w-10 h-10 rounded-full object-cover" />
+              ) : (
+                <span className="text-2xl">{summary.emoji}</span>
+              )}
+              <div>
+                <p className="font-bold text-sm">{summary.displayName}</p>
+                <p className="text-[11px] text-muted-foreground">Your identity</p>
+              </div>
+            </div>
+
+            {/* Goals */}
+            {summary.goals.length > 0 && (
+              <div className="p-3 rounded-xl bg-secondary">
+                <p className="text-[11px] text-muted-foreground mb-1.5">Your goals</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {summary.goals.map(g => (
+                    <span key={g} className="text-xs bg-card px-2 py-0.5 rounded-full border border-border">{g}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Rules */}
+            <div className="p-3 rounded-xl bg-secondary flex items-center justify-between">
+              {summary.rulesCount > 0 ? (
+                <>
+                  <p className="text-sm font-semibold">
+                    {summary.rulesCount} rule{summary.rulesCount !== 1 ? 's' : ''} added
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">Streak tracking is live</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-muted-foreground">No rules yet</p>
+                  <p className="text-[11px] text-muted-foreground">Add them from Home</p>
+                </>
+              )}
+            </div>
+
+            <p className="text-[11px] text-muted-foreground text-center pt-1">
+              Next step: find an accountability partner on the Home tab.
+            </p>
+          </div>
+        )}
+
         <motion.button
           whileTap={{ scale: 0.93 }}
           onClick={onDismiss}

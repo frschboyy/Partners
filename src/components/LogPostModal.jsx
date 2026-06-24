@@ -231,63 +231,62 @@ export default function LogPostModal({ currentUser, profile, rules = [], partner
           <form onSubmit={handleSubmit} className="overflow-y-auto flex-1 p-5 space-y-4">
             {/* Caption / description */}
             {postType !== 'workout' && (
-              <div>
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">
                   {postType === 'meal' ? 'What did you eat?' : 'Notes'}
                 </label>
-                <div className="relative">
-                  <textarea
-                    className="w-full bg-input border border-border rounded-lg px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground resize-none focus:outline-none focus:ring-2 focus:ring-primary pr-12"
-                    rows={3}
-                    placeholder={postType === 'meal' ? 'Describe your meal...' : 'What happened?'}
-                    value={caption}
-                    onChange={e => setCaption(e.target.value)}
-                  />
-                  {postType === 'meal' && (
-                    <div className="absolute bottom-2 right-2 flex gap-1">
-                      {transcribing ? (
-                        <div className="p-2 rounded-full bg-accent-muted flex flex-col items-center gap-0.5">
-                          <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                        </div>
-                      ) : recording ? (
-                        <motion.button
-                          type="button"
-                          whileTap={{ scale: 0.85 }}
-                          onClick={stopRecording}
-                          animate={{ scale: [1, 1.1, 1] }}
-                          transition={{ repeat: Infinity, duration: 0.8 }}
-                          className="p-2 rounded-full bg-destructive text-destructive-foreground"
-                        >
-                          <MicOff size={16} />
-                        </motion.button>
-                      ) : (
-                        <motion.button
-                          type="button"
-                          whileTap={{ scale: 0.85 }}
-                          onClick={startRecording}
-                          className="p-2 rounded-full bg-secondary text-muted-foreground"
-                        >
-                          <Mic size={16} />
-                        </motion.button>
-                      )}
-                    </div>
-                  )}
-                </div>
-                {transcribing && (
-                  <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-                    <span className="inline-block w-2 h-2 border border-primary border-t-transparent rounded-full animate-spin" />
-                    Transcribing & cleaning up… (up to 15s)
-                  </p>
+                <textarea
+                  className="w-full bg-input border border-border rounded-lg px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground resize-none focus:outline-none focus:ring-2 focus:ring-primary"
+                  rows={3}
+                  placeholder={postType === 'meal' ? 'Describe your meal...' : 'What happened?'}
+                  value={caption}
+                  onChange={e => setCaption(e.target.value)}
+                />
+
+                {/* Voice-to-text — labelled so it's discoverable */}
+                {postType === 'meal' && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {transcribing ? (
+                      <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent-muted text-xs font-semibold text-muted-foreground">
+                        <span className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin inline-block" />
+                        Transcribing… (up to 15s)
+                      </span>
+                    ) : recording ? (
+                      <motion.button
+                        type="button"
+                        whileTap={{ scale: 0.9 }}
+                        onClick={stopRecording}
+                        animate={{ scale: [1, 1.04, 1] }}
+                        transition={{ repeat: Infinity, duration: 0.8 }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-destructive text-destructive-foreground text-xs font-semibold"
+                      >
+                        <MicOff size={13} /> Stop recording
+                      </motion.button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={startRecording}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary text-muted-foreground text-xs font-semibold transition-colors hover:text-foreground"
+                      >
+                        <Mic size={13} /> Describe with voice
+                      </button>
+                    )}
+                    {caption && !transcribing && !recording && (
+                      <button
+                        type="button"
+                        onClick={() => { setCaption(''); setVoiceError(''); }}
+                        className="text-xs text-muted-foreground flex items-center gap-1"
+                      >
+                        <RefreshCw size={11} /> Clear
+                      </button>
+                    )}
+                  </div>
                 )}
+
                 {voiceError && (
-                  <p className="text-xs text-destructive mt-1 flex items-center gap-1">
+                  <p className="text-xs text-destructive flex items-center gap-1">
                     <AlertCircle size={11} /> {voiceError}
                   </p>
-                )}
-                {caption && postType === 'meal' && !transcribing && (
-                  <button type="button" onClick={() => { setCaption(''); setVoiceError(''); }} className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-                    <RefreshCw size={11} /> Re-record / clear
-                  </button>
                 )}
               </div>
             )}

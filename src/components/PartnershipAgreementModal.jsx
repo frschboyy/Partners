@@ -16,6 +16,7 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [showRenegotiateConfirm, setShowRenegotiateConfirm] = useState(false);
+  const [showDeclineConfirm, setShowDeclineConfirm] = useState(false);
 
   // Live partnership state — kept fresh via on-mount fetch + real-time subscription
   const [livePartnership, setLivePartnership] = useState(partnership);
@@ -184,6 +185,38 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
       onClose();
     } catch (err) {
       setSaveError('Failed to accept the agreement — please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDecline() {
+    setSaving(true);
+    setSaveError('');
+    try {
+      await api.entities.Partnership.update(partnership.id, {
+        status: 'dissolved',
+        user_a_agreed: false,
+        user_b_agreed: false,
+        last_proposer_id: null,
+      });
+      const proposerId = livePartnership.last_proposer_id;
+      if (proposerId) {
+        await supabase.from('notifications').insert({
+          user_id: proposerId,
+          type: 'partnership_declined',
+          title: `${myName} declined your proposal`,
+          body: `${myName} has declined the partnership agreement. The partnership has ended.`,
+          from_user_id: currentUserId,
+          from_user_name: myName,
+          action_id: partnership.id,
+          read: false,
+        });
+      }
+      setShowDeclineConfirm(false);
+      onClose();
+    } catch (err) {
+      setSaveError('Failed to decline — please try again.');
     } finally {
       setSaving(false);
     }
@@ -518,6 +551,14 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
                 >
                   <Send size={14} /> Counter-Propose
                 </motion.button>
+                <motion.button
+                  whileTap={{ scale: 0.96 }}
+                  onClick={() => setShowDeclineConfirm(true)}
+                  disabled={saving}
+                  className="w-full py-2 rounded-lg text-xs font-semibold text-destructive border border-destructive/30 bg-destructive/5"
+                >
+                  Decline partnership
+                </motion.button>
               </>
             ) : (
               <motion.button
@@ -533,6 +574,42 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
             )}
           </div>
         </motion.div>
+      {/* Decline confirm dialog */}
+      <AnimatePresence>
+        {showDeclineConfirm && (
+          <motion.div
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 px-6"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={e => e.target === e.currentTarget && setShowDeclineConfirm(false)}
+          >
+            <motion.div
+              className="bg-card rounded-2xl p-6 space-y-4 w-full max-w-sm"
+              initial={{ scale: 0.92, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.92, opacity: 0 }}
+            >
+              <div className="text-center">
+                <p className="text-3xl mb-2">❌</p>
+                <h3 className="font-bold">Decline partnership?</h3>
+                <p className="text-sm text-muted-foreground mt-2">
+                  This will end the partnership with {partnerName}. They'll be notified that you declined. This cannot be undone.
+                </p>
+              </div>
+              {saveError && (
+                <p className="text-xs text-destructive text-center">{saveError}</p>
+              )}
+              <div className="flex gap-3">
+                <button onClick={() => setShowDeclineConfirm(false)} disabled={saving}
+                  className="flex-1 py-2.5 rounded-xl border border-border font-semibold text-sm">
+                  Cancel
+                </button>
+                <button onClick={handleDecline} disabled={saving}
+                  className="flex-1 py-2.5 rounded-xl bg-destructive text-destructive-foreground font-bold text-sm">
+                  {saving ? 'Declining…' : 'Yes, decline'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       </motion.div>
     </AnimatePresence>
   );

@@ -93,9 +93,17 @@ export default function Settings({ currentUser, profile, onProfileUpdate, curren
 
   async function handleDeleteAccount() {
     setDeleting(true);
+    const emailToNotify = currentUser?.email;
     try {
       const { error } = await supabase.rpc('delete_user');
       if (error) throw error;
+      if (emailToNotify) {
+        api.integrations.Core.SendEmail({
+          to: emailToNotify,
+          subject: 'Your account has been deleted',
+          body: `Hi,\n\nYour Partners account (${emailToNotify}) has been permanently deleted. All your data — profile, rules, posts, partnerships, and messages — has been erased and cannot be recovered.\n\nIf you didn't request this, please contact support immediately.\n\nThe Partners team`,
+        }).catch(() => {});
+      }
       await supabase.auth.signOut();
       showToast('Account deleted');
       setTimeout(() => { window.location.href = '/login'; }, 1600);
