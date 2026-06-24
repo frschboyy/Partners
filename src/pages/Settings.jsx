@@ -33,6 +33,7 @@ export default function Settings({ currentUser, profile, onProfileUpdate, curren
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [deleteStep, setDeleteStep] = useState(0);
   const [deleting, setDeleting] = useState(false);
+  const [deleted, setDeleted] = useState(false);
   const [pendingFontSize, setPendingFontSize] = useState(() => getSavedFontSize());
   const [showColorTheme, setShowColorTheme] = useState(false);
   const [showTextSize, setShowTextSize] = useState(false);
@@ -107,9 +108,12 @@ export default function Settings({ currentUser, profile, onProfileUpdate, curren
           body: `Hi,\n\nYour Partners account (${emailToNotify}) has been permanently deleted. All your data — profile, rules, posts, partnerships, and messages — has been erased and cannot be recovered.\n\nIf you didn't request this, please contact support immediately.\n\nThe Partners team`,
         }).catch(() => {});
       }
-      await supabase.auth.signOut();
-      showToast('Account deleted');
-      setTimeout(() => { window.location.href = '/login'; }, 1600);
+      setDeleteStep(0);
+      setDeleted(true);
+      setTimeout(async () => {
+        await supabase.auth.signOut();
+        window.location.href = '/login';
+      }, 2600);
     } catch (err) {
       setDeleting(false);
       setDeleteStep(0);
@@ -189,6 +193,28 @@ export default function Settings({ currentUser, profile, onProfileUpdate, curren
       onThemeChange('custom');
       saveTheme('custom', darkMode);
     }
+  }
+
+  if (deleted) {
+    return (
+      <motion.div
+        className="fixed inset-0 z-[9999] flex flex-col items-center justify-center gap-4 bg-background"
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.3 }}
+      >
+        <motion.span
+          className="text-6xl"
+          animate={{ rotate: [0, -15, 15, -10, 10, 0] }}
+          transition={{ duration: 0.8, delay: 0.2 }}
+        >
+          👋
+        </motion.span>
+        <p className="text-xl font-bold">Sorry to see you go</p>
+        <p className="text-sm text-muted-foreground">Your account has been permanently deleted.</p>
+        <p className="text-xs text-muted-foreground/50 mt-2">Redirecting you out…</p>
+      </motion.div>
+    );
   }
 
   return (
