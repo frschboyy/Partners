@@ -9,7 +9,7 @@ export default function WitnessedSlipModal({ currentUser, profile, partnerName, 
   const [selectedRuleId, setSelectedRuleId] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
-  const { message: toastMessage, show: showToast } = useToast();
+  const { message: toastMessage, variant: toastVariant, show: showToast } = useToast();
 
   useEffect(() => {
     async function fetchPartnerRules() {
@@ -56,7 +56,7 @@ export default function WitnessedSlipModal({ currentUser, profile, partnerName, 
       setTimeout(onClose, 1500);
     } catch (err) {
       console.error('Failed to report slip:', err?.message || err);
-      showToast('Failed to report slip — please try again');
+      showToast('Failed to report slip — please try again', 'error');
     }
     setSaving(false);
   }
@@ -67,7 +67,7 @@ export default function WitnessedSlipModal({ currentUser, profile, partnerName, 
       initial={{ opacity: 0 }} animate={{ opacity: 1 }}
       onClick={e => e.target === e.currentTarget && onClose()}
     >
-      <Toast message={toastMessage} />
+      <Toast message={toastMessage} variant={toastVariant} />
       <motion.div
         className="w-full max-w-lg bg-card rounded-t-2xl p-6 space-y-4"
         initial={{ y: '100%' }} animate={{ y: 0 }}

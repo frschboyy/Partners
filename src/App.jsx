@@ -178,6 +178,28 @@ function MainApp({ user }) {
 
   const TAB_ORDER = ['home', 'feed', 'chat', 'leaderboard', 'settings'];
 
+  const swipeTouchStartX = useRef(null);
+  const swipeTouchStartY = useRef(null);
+  const swipeBlocked = useRef(false);
+
+  function handleSwipeTouchStart(e) {
+    swipeTouchStartX.current = e.touches[0].clientX;
+    swipeTouchStartY.current = e.touches[0].clientY;
+    swipeBlocked.current = !!e.target?.closest?.('[data-no-swipe-nav]');
+  }
+
+  function handleSwipeTouchEnd(e) {
+    if (swipeTouchStartX.current === null || swipeBlocked.current) return;
+    if (activeTab === 'notifications') return;
+    const dx = e.changedTouches[0].clientX - swipeTouchStartX.current;
+    const dy = e.changedTouches[0].clientY - swipeTouchStartY.current;
+    swipeTouchStartX.current = null;
+    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    const idx = TAB_ORDER.indexOf(activeTab);
+    if (dx < 0 && idx < TAB_ORDER.length - 1) handleTabChange(TAB_ORDER[idx + 1]);
+    else if (dx > 0 && idx > 0) handleTabChange(TAB_ORDER[idx - 1]);
+  }
+
   function handleTabChange(tab) {
     if (tab === 'feed') setNewFeedPosts(false);
     if (tab === 'notifications') setUnreadNotifications(0);
@@ -218,7 +240,11 @@ function MainApp({ user }) {
         )}
       </AnimatePresence>
       {/* Page content */}
-      <div className="flex-1 overflow-hidden relative">
+      <div
+        className="flex-1 overflow-hidden relative"
+        onTouchStart={handleSwipeTouchStart}
+        onTouchEnd={handleSwipeTouchEnd}
+      >
         {activeTab === 'home' && (
           <div className="h-full overflow-y-auto">
             <Home

@@ -33,7 +33,7 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
 
   const fileInputRef = useRef(null);
   const touchStartX = useRef(null);
-  const { message: toastMsg, show: showToast } = useToast();
+  const { message: toastMsg, variant: toastMsgVariant, show: showToast } = useToast();
 
   // Drag-down-to-close
   const [dragOffset, setDragOffset] = useState(0);
@@ -117,7 +117,7 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
         setEditPhotoUrls(prev => [...prev, file_url]);
       }
     } catch (err) {
-      showToast(err?.userMessage ?? 'Photo upload failed — please try again.');
+      showToast(err?.userMessage ?? 'Photo upload failed — please try again.', 'error');
     }
     editingIndexRef.current = -1;
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -138,7 +138,7 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
       onRefresh?.();
     } catch (err) {
       console.error('Post update failed:', err?.message || err);
-      showToast('Failed to save changes');
+      showToast('Failed to save changes', 'error');
     }
     setSaving(false);
   }
@@ -151,7 +151,7 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
       showToast('Post deleted');
       onRefresh?.();
     } catch (_) {
-      showToast('Failed to delete post');
+      showToast('Failed to delete post', 'error');
     }
   }
 
@@ -172,7 +172,7 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
           transition: !dragRef.current.active ? 'transform 0.35s cubic-bezier(0.32,0.72,0,1)' : 'none',
         }}
       >
-        <Toast message={toastMsg} position="top" />
+        <Toast message={toastMsg} variant={toastMsgVariant} position="top" />
         <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
 
         {/* Drag zone — pill + header */}
@@ -235,6 +235,7 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
               {/* Image carousel */}
               <div
                 className="relative flex-1 bg-black overflow-hidden"
+                data-no-swipe-nav
                 onTouchStart={e => { touchStartX.current = e.touches[0].clientX; }}
                 onTouchEnd={e => {
                   if (touchStartX.current === null) return;

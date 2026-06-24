@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Compass, Flame, Star, ChevronDown, UserX, Eye, AlertTriangle } from 'lucide-react';
+import { Plus, Compass, Flame, Star, ChevronDown, UserX, Eye, AlertTriangle, Search } from 'lucide-react';
 import { useToast, Toast } from '@/components/Toast';
 import PartnershipFinancials from '@/components/PartnershipFinancials';
 import { api, supabase } from '@/api/supabaseClient';
@@ -17,7 +17,7 @@ import CheatGuard from '@/components/CheatGuard';
 import { SUMMERTIDES } from '@/lib/constants';
 
 export default function Home({ currentUser, profile, onProfileUpdate, navIntent, onClearNavIntent }) {
-  const { message: homeToastMsg, show: showHomeToast } = useToast();
+  const { message: homeToastMsg, variant: homeToastVariant, show: showHomeToast } = useToast();
   const [rules, setRules] = useState([]);
   const [partnerships, setPartnerships] = useState([]);
   const [partnerProfiles, setPartnerProfiles] = useState({});
@@ -38,6 +38,7 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
   const [summertidesDecl, setSummertidesDecl] = useState(null);
   const [showSummertides, setShowSummertides] = useState(false);
   const partnersRef = useRef(null);
+  const [partnerSearch, setPartnerSearch] = useState('');
 
   const today = new Date();
   const isSummertidesWindow = today.getMonth() === SUMMERTIDES.month &&
@@ -78,6 +79,7 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
     }
     onClearNavIntent?.();
   }, [navIntent, loading, partnerships]);
+
 
   async function loadAll() {
     setLoading(true);
@@ -170,13 +172,21 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
   const vibeScore = profile?.vibe_score || 0;
   const activePartners = partnerships.filter(p => p.status === 'active');
   const negotiatingPartners = partnerships.filter(p => p.status === 'negotiating');
+  const totalPartners = activePartners.length + negotiatingPartners.length;
+  const searchQuery = partnerSearch.trim().toLowerCase();
+  const filteredActive = searchQuery
+    ? activePartners.filter(p => (p.user_a_id === currentUser.id ? p.user_b_name : p.user_a_name)?.toLowerCase().includes(searchQuery))
+    : activePartners;
+  const filteredNegotiating = searchQuery
+    ? negotiatingPartners.filter(p => (p.user_a_id === currentUser.id ? p.user_b_name : p.user_a_name)?.toLowerCase().includes(searchQuery))
+    : negotiatingPartners;
   const partnerUserIds = [...activePartners, ...negotiatingPartners].map(
     p => p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id
   );
 
   return (
     <div className="flex flex-col min-h-screen bg-background pb-24">
-      <Toast message={homeToastMsg} position="top" />
+      <Toast message={homeToastMsg} variant={homeToastVariant} position="top" />
       <div className="max-w-lg mx-auto w-full px-4 pt-6 space-y-6">
 
         {/* Header */}
@@ -349,6 +359,18 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
             </motion.button>
           </div>
 
+          {totalPartners >= 2 && (
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+              <input
+                className="w-full h-9 pl-8 pr-3 rounded-lg border border-border bg-input text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                placeholder="Search partners…"
+                value={partnerSearch}
+                onChange={e => setPartnerSearch(e.target.value)}
+              />
+            </div>
+          )}
+
           {/* Fixed-height scrollable card list — sized to show ~2 cards */}
           <div className="overflow-y-auto space-y-3" style={{ maxHeight: 384 }}>
             {loading && (
@@ -358,7 +380,7 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
               </>
             )}
             {/* Negotiating partnerships — remain fully active, renegotiation is an overlay */}
-            {negotiatingPartners.map(p => {
+            {filteredNegotiating.map(p => {
               const partnerId = p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id;
               const partnerName = p.user_a_id === currentUser.id ? p.user_b_name : p.user_a_name;
               const partnerProfile = partnerProfiles[partnerId];
@@ -433,8 +455,17 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
               </div>
             )}
 
+            {/* No search results */}
+            {searchQuery && filteredActive.length === 0 && filteredNegotiating.length === 0 && (
+              <div className="card-brutal p-5 text-center space-y-1">
+                <p className="text-2xl">🔍</p>
+                <p className="font-semibold text-sm">No match for "{partnerSearch.trim()}"</p>
+                <p className="text-xs text-muted-foreground">Try a different name.</p>
+              </div>
+            )}
+
             {/* Active partners */}
-            {activePartners.map(p => {
+            {filteredActive.map(p => {
               const partnerId = p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id;
               const partnerName = p.user_a_id === currentUser.id ? p.user_b_name : p.user_a_name;
               const partnerProfile = partnerProfiles[partnerId];
@@ -672,6 +703,7 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
           </motion.div>
         )}
       </AnimatePresence>
+
     </div>
   );
 }

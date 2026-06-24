@@ -40,7 +40,7 @@ export default function FeedPost({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const { message: toastMessage, show: showToast } = useToast();
+  const { message: toastMessage, variant: toastVariant, show: showToast } = useToast();
   const fileInputRef = useRef(null);
   const editingIndexRef = useRef(-1);
   const imageTransitioning = useRef(false);
@@ -147,7 +147,7 @@ export default function FeedPost({
         setEditPhotoUrls(prev => [...prev, file_url]);
       }
     } catch (err) {
-      showToast(err?.userMessage ?? 'Photo upload failed — please try again.');
+      showToast(err?.userMessage ?? 'Photo upload failed — please try again.', 'error');
     }
     editingIndexRef.current = -1;
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -165,7 +165,7 @@ export default function FeedPost({
       showToast('Post updated');
       onRefresh?.();
     } catch (_) {
-      showToast('Failed to save changes');
+      showToast('Failed to save changes', 'error');
     }
     setSaving(false);
   }
@@ -177,7 +177,7 @@ export default function FeedPost({
       showToast('Post deleted');
       setTimeout(() => onRefresh?.(), 1400);
     } catch (_) {
-      showToast('Failed to delete post');
+      showToast('Failed to delete post', 'error');
     }
   }
 
@@ -195,6 +195,7 @@ export default function FeedPost({
             drag="x"
             dragConstraints={{ left: 0, right: 0 }}
             dragElastic={0.2}
+            data-no-swipe-nav
             onPointerDown={e => { e.stopPropagation(); e.nativeEvent.stopPropagation(); }}
             onDragEnd={(_, info) => {
               if (imageTransitioning.current) return;
@@ -563,7 +564,7 @@ export default function FeedPost({
         )}
       </AnimatePresence>
 
-      <Toast message={toastMessage} />
+      <Toast message={toastMessage} variant={toastVariant} />
 
       <CommentsSheet
         postId={commentPostId || post.id}

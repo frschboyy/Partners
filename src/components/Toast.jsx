@@ -1,23 +1,34 @@
 import React, { useState, useCallback, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Check } from 'lucide-react';
+import { Check, X, AlertTriangle, Info } from 'lucide-react';
 
 export function useToast({ duration = 2000 } = {}) {
   const [message, setMessage] = useState(null);
+  const [variant, setVariant] = useState('success');
   const timerRef = useRef(null);
 
-  const show = useCallback((msg) => {
+  const show = useCallback((msg, v = 'success') => {
     if (timerRef.current) clearTimeout(timerRef.current);
     setMessage(msg);
+    setVariant(v);
     timerRef.current = setTimeout(() => setMessage(null), duration);
   }, [duration]);
 
-  return { message, show };
+  return { message, variant, show };
 }
 
-export function Toast({ message, position = 'bottom' }) {
+const VARIANTS = {
+  success: { Icon: Check, iconBg: 'hsl(var(--theme-accent))', iconFg: 'hsl(var(--theme-accent-fg))' },
+  error:   { Icon: X,     iconBg: 'hsl(var(--destructive))',  iconFg: 'hsl(var(--destructive-foreground))' },
+  warning: { Icon: AlertTriangle, iconBg: '#f59e0b', iconFg: '#000' },
+  info:    { Icon: Info,  iconBg: 'hsl(var(--primary))',      iconFg: 'hsl(var(--primary-foreground))' },
+};
+
+export function Toast({ message, variant = 'success', position = 'bottom' }) {
   const isTop = position === 'top';
+  const cfg = VARIANTS[variant] ?? VARIANTS.success;
+  const { Icon } = cfg;
 
   const positionStyle = isTop
     ? { top: '1.25rem', left: '50%', transform: 'translateX(-50%)' }
@@ -40,9 +51,9 @@ export function Toast({ message, position = 'bottom' }) {
           >
             <div
               className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0"
-              style={{ background: 'hsl(var(--theme-accent))' }}
+              style={{ background: cfg.iconBg }}
             >
-              <Check size={13} strokeWidth={3} style={{ color: 'hsl(var(--theme-accent-fg))' }} />
+              <Icon size={13} strokeWidth={3} style={{ color: cfg.iconFg }} />
             </div>
             <span className="text-sm font-bold tracking-tight">{message}</span>
           </div>

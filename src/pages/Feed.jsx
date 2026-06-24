@@ -61,7 +61,7 @@ function FeedSkeleton() {
 }
 
 export default function Feed({ currentUser, profile }) {
-  const { message: feedToastMessage, show: showFeedToast } = useToast();
+  const { message: feedToastMessage, variant: feedToastVariant, show: showFeedToast } = useToast();
   const [posts, setPosts] = useState([]);
   const [profiles, setProfiles] = useState({});
   const [allPostsByUser, setAllPostsByUser] = useState({});
@@ -155,7 +155,7 @@ export default function Feed({ currentUser, profile }) {
 
   return (
     <div className="h-full relative">
-      <Toast message={feedToastMessage} />
+      <Toast message={feedToastMessage} variant={feedToastVariant} />
 
       <AnimatePresence mode="wait" initial={false}>
         {loading ? (

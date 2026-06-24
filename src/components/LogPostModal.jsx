@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { X, Mic, MicOff, Camera, RefreshCw, Plus, AlertCircle } from 'lucide-react';
-import { api } from '@/api/supabaseClient';
+import { api, supabase } from '@/api/supabaseClient';
 import { motion, AnimatePresence } from 'framer-motion';
 import { compressImage } from '@/lib/imageUtils';
 import { useToast, Toast } from '@/components/Toast';
@@ -25,7 +25,7 @@ export default function LogPostModal({ currentUser, profile, rules = [], partner
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [photoError, setPhotoError] = useState('');
-  const { message: toastMessage, show: showToast } = useToast();
+  const { message: toastMessage, variant: toastVariant, show: showToast } = useToast();
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
   const fileInputRef = useRef(null);
@@ -171,14 +171,22 @@ export default function LogPostModal({ currentUser, profile, rules = [], partner
       }
       await api.entities.Post.create(postData);
 
+      const bodyText = caption?.trim()
+        ? `"${caption.trim().slice(0, 80)}${caption.trim().length > 80 ? '…' : ''}"`
+        : `${photoUrls.length} photo${photoUrls.length !== 1 ? 's' : ''} uploaded`;
+      supabase.from('notifications').insert({
+        user_id: currentUser.id,
+        type: 'self_post_created',
+        title: `You logged a ${postType}`,
+        body: bodyText,
+        read: true,
+      });
+
       showToast('Post logged!');
-      setTimeout(() => {
-        onPosted?.();
-        onClose();
-      }, 900);
+      setTimeout(() => { onPosted?.(); onClose(); }, 900);
     } catch (err) {
       console.error('Failed to submit post:', err?.message || err);
-      showToast('Failed to post — please try again');
+      showToast('Failed to post — please try again', 'error');
     }
     setSaving(false);
   }
@@ -190,7 +198,7 @@ export default function LogPostModal({ currentUser, profile, rules = [], partner
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         onClick={e => e.target === e.currentTarget && onClose()}
       >
-        <Toast message={toastMessage} />
+        <Toast message={toastMessage} variant={toastVariant} />
         <motion.div
           className="w-full max-w-lg bg-card rounded-t-2xl flex flex-col"
           style={{ maxHeight: '92vh' }}

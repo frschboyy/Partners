@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X } from 'lucide-react';
-import { api } from '@/api/supabaseClient';
+import { api, supabase } from '@/api/supabaseClient';
 import { PREDEFINED_RULES } from '@/lib/rules';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useToast, Toast } from '@/components/Toast';
@@ -33,7 +33,7 @@ const CUSTOM_EMOJIS = [
 ];
 
 export default function AddRuleModal({ userId, existingRuleTitles = [], onAdded, onClose }) {
-  const { message: toastMessage, show: showToast } = useToast();
+  const { message: toastMessage, variant: toastVariant, show: showToast } = useToast();
   const [ruleSearch, setRuleSearch] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
   const [selectedRule, setSelectedRule] = useState(null);
@@ -87,11 +87,21 @@ export default function AddRuleModal({ userId, existingRuleTitles = [], onAdded,
         recurring_allowance: hasRecurring,
         allowance_interval_days: hasRecurring ? Number(intervalDays) : undefined,
       });
+
+      const emoji = isCustom ? customEmoji : selectedRule.emoji;
+      supabase.from('notifications').insert({
+        user_id: userId,
+        type: 'self_rule_added',
+        title: `${emoji} Rule added: ${selectedRule.title}`,
+        body: hasRecurring ? `Allowance every ${intervalDays} days` : 'Added to your rules list',
+        read: true,
+      });
+
       onAdded?.(rule);
       onClose?.();
     } catch (err) {
       console.error('Failed to add rule:', err);
-      showToast('Failed to add rule — please try again');
+      showToast('Failed to add rule — please try again', 'error');
     } finally {
       setSaving(false);
     }
@@ -113,7 +123,7 @@ export default function AddRuleModal({ userId, existingRuleTitles = [], onAdded,
           exit={{ y: '100%' }}
           transition={{ type: 'spring', damping: 25, stiffness: 300 }}
         >
-          <Toast message={toastMessage} />
+          <Toast message={toastMessage} variant={toastVariant} />
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold font-heading">Add a Rule</h2>
             <button onClick={onClose} aria-label="Close" className="p-2 rounded-full bg-secondary">

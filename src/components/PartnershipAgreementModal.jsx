@@ -437,8 +437,8 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
                 </div>
               ))}
               <div className="flex gap-2">
-                <input className="flex-1 bg-input border border-border rounded-lg px-3 py-2 text-sm" placeholder="Add rule" value={newARule} onChange={e => setNewARule(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && newARule.trim()) { setUserARules(r => [...r, newARule.trim()]); setNewARule(''); }}} />
-                <button onClick={() => { if (newARule.trim()) { setUserARules(r => [...r, newARule.trim()]); setNewARule(''); }}} className="p-2 rounded-lg bg-secondary"><Plus size={16} /></button>
+                <input className="flex-1 bg-input border border-border rounded-lg px-3 py-2 text-sm" placeholder="Add rule" value={newARule} onChange={e => setNewARule(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && newARule.trim()) { const t = newARule.trim(); setUserARules(r => r.some(x => x.toLowerCase() === t.toLowerCase()) ? r : [...r, t]); setNewARule(''); }}} />
+                <button onClick={() => { if (newARule.trim()) { const t = newARule.trim(); setUserARules(r => r.some(x => x.toLowerCase() === t.toLowerCase()) ? r : [...r, t]); setNewARule(''); }}} className="p-2 rounded-lg bg-secondary"><Plus size={16} /></button>
               </div>
             </section>
 
@@ -461,8 +461,8 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
                 </div>
               ))}
               <div className="flex gap-2">
-                <input className="flex-1 bg-input border border-border rounded-lg px-3 py-2 text-sm" placeholder="Add rule" value={newBRule} onChange={e => setNewBRule(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && newBRule.trim()) { setUserBRules(r => [...r, newBRule.trim()]); setNewBRule(''); }}} />
-                <button onClick={() => { if (newBRule.trim()) { setUserBRules(r => [...r, newBRule.trim()]); setNewBRule(''); }}} className="p-2 rounded-lg bg-secondary"><Plus size={16} /></button>
+                <input className="flex-1 bg-input border border-border rounded-lg px-3 py-2 text-sm" placeholder="Add rule" value={newBRule} onChange={e => setNewBRule(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && newBRule.trim()) { const t = newBRule.trim(); setUserBRules(r => r.some(x => x.toLowerCase() === t.toLowerCase()) ? r : [...r, t]); setNewBRule(''); }}} />
+                <button onClick={() => { if (newBRule.trim()) { const t = newBRule.trim(); setUserBRules(r => r.some(x => x.toLowerCase() === t.toLowerCase()) ? r : [...r, t]); setNewBRule(''); }}} className="p-2 rounded-lg bg-secondary"><Plus size={16} /></button>
               </div>
             </section>
 

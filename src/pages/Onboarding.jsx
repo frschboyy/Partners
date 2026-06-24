@@ -4,6 +4,7 @@ import { api, supabase } from '@/api/supabaseClient';
 import { GOAL_OPTIONS } from '@/lib/goals';
 import { PREDEFINED_RULES } from '@/lib/rules';
 import { Camera } from 'lucide-react';
+import MilestoneModal from '@/components/MilestoneModal';
 
 const EMOJIS = ['😎', '💪', '🔥', '🦁', '🐺', '⚡', '🌊', '🎯', '🚀', '👑', '🦋', '🌟'];
 
@@ -20,6 +21,7 @@ export default function Onboarding({ user, onComplete }) {
   const [saveError, setSaveError] = useState('');
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoError, setPhotoError] = useState('');
+  const [completedProfile, setCompletedProfile] = useState(null);
   const fileInputRef = useRef(null);
 
   const steps = [
@@ -102,7 +104,7 @@ export default function Onboarding({ user, onComplete }) {
         });
       }
 
-      onComplete(profile);
+      setCompletedProfile(profile);
     } catch (err) {
       setSaveError(err.message || 'Something went wrong — please try again');
     } finally {
@@ -338,5 +340,11 @@ export default function Onboarding({ user, onComplete }) {
         </div>
       </div>
     </div>
+
+    <AnimatePresence>
+      {completedProfile && (
+        <MilestoneModal type="onboarding_complete" onDismiss={() => onComplete(completedProfile)} />
+      )}
+    </AnimatePresence>
   );
 }

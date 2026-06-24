@@ -48,7 +48,7 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
   const [loading, setLoading] = useState(true);
   const [pendingSlips, setPendingSlips] = useState([]);
   const [actionedIds, setActionedIds] = useState(() => getActionedIds());
-  const { message: toastMessage, show: showToast } = useToast();
+  const { message: toastMessage, variant: toastVariant, show: showToast } = useToast();
 
   const needsSetPassword =
     !currentUser?.identities?.some(i => i.provider === 'email') &&
@@ -137,7 +137,17 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
     partner_removed: '👋',
   };
 
-  const isEmpty = !loading && notifications.length === 0 && pendingSlips.length === 0 && !needsSetPassword;
+  const selfIcons = {
+    self_post_created: '📸',
+    self_rule_added: '📌',
+    self_slip_logged: '😤',
+    self_partnership_formed: '🤝',
+  };
+
+  const selfNotifs = notifications.filter(n => n.type?.startsWith('self_'));
+  const partnerNotifs = notifications.filter(n => !n.type?.startsWith('self_'));
+
+  const isEmpty = !loading && partnerNotifs.length === 0 && pendingSlips.length === 0 && !needsSetPassword;
 
   return (
     <motion.div
@@ -145,7 +155,7 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
       initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
       transition={{ type: 'spring', damping: 25, stiffness: 300 }}
     >
-      <Toast message={toastMessage} />
+      <Toast message={toastMessage} variant={toastVariant} />
       <div className="flex items-center gap-3 p-4 border-b border-border flex-shrink-0">
         <Bell size={20} />
         <h2 className="font-bold text-lg flex-1">Notifications</h2>
@@ -217,7 +227,7 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
             <p className="text-sm text-muted-foreground">Nothing new right now.</p>
           </div>
         ) : (
-          notifications.map(n => {
+          partnerNotifs.map(n => {
             const action = getAction(n);
             const inner = (
               <>
@@ -260,6 +270,25 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
             }
             return <div key={n.id} className={cls}>{inner}</div>;
           })
+        )}
+
+        {/* Your Activity section */}
+        {!loading && selfNotifs.length > 0 && (
+          <>
+            <div className={`pt-2 pb-1 ${partnerNotifs.length > 0 || pendingSlips.length > 0 || needsSetPassword ? 'border-t border-border mt-1' : ''}`}>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Your Activity</p>
+            </div>
+            {selfNotifs.map(n => (
+              <div key={n.id} className="flex gap-3 p-3 rounded-xl border border-border bg-secondary/60">
+                <span className="text-xl flex-shrink-0 mt-0.5">{selfIcons[n.type] || '⚡'}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-sm">{n.title}</p>
+                  {n.body && <p className="text-xs text-muted-foreground mt-0.5">{n.body}</p>}
+                  <p className="text-[10px] text-muted-foreground mt-1">{formatDateTime(n.created_at)}</p>
+                </div>
+              </div>
+            ))}
+          </>
         )}
       </div>
     </motion.div>

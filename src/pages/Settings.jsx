@@ -11,7 +11,7 @@ const EMOJIS = ['😎', '💪', '🔥', '🦁', '🐺', '⚡', '🌊', '🎯', '
 
 export default function Settings({ currentUser, profile, onProfileUpdate, currentTheme, darkMode, onThemeChange, onDarkModeChange, scrollToSection, onSectionHandled }) {
   const { checkUserAuth } = useAuth();
-  const { message: toastMessage, show: showToast } = useToast({ duration: 2000 });
+  const { message: toastMessage, variant: toastVariant, show: showToast } = useToast({ duration: 2000 });
   const [editName, setEditName] = useState(profile?.display_name || '');
   const [editEmoji, setEditEmoji] = useState(profile?.emoji_avatar || '😎');
   const [saving, setSaving] = useState(false);
@@ -102,7 +102,7 @@ export default function Settings({ currentUser, profile, onProfileUpdate, curren
     } catch (err) {
       setDeleting(false);
       setDeleteStep(0);
-      showToast(err?.message || 'Failed to delete account. Please try again.');
+      showToast(err?.message || 'Failed to delete account. Please try again.', 'error');
     }
   }
 
@@ -130,7 +130,7 @@ export default function Settings({ currentUser, profile, onProfileUpdate, curren
       });
       onProfileUpdate?.(updated);
     } catch (err) {
-      showToast(err?.userMessage ?? 'Photo upload failed — please try again');
+      showToast(err?.userMessage ?? 'Photo upload failed — please try again', 'error');
     }
   }
 
@@ -172,7 +172,7 @@ export default function Settings({ currentUser, profile, onProfileUpdate, curren
 
   return (
     <div className="flex flex-col min-h-screen bg-background pb-24">
-      <Toast message={toastMessage} position="top" />
+      <Toast message={toastMessage} variant={toastVariant} position="top" />
       <div className="max-w-lg mx-auto w-full px-4 pt-6 space-y-6">
         <div>
           <h1 className="text-2xl font-bold font-heading">Settings</h1>
@@ -394,6 +394,29 @@ export default function Settings({ currentUser, profile, onProfileUpdate, curren
                   {showNew ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
+              {newPassword && (() => {
+                let score = 1;
+                if (newPassword.length >= 8) score++;
+                if (/[A-Z]/.test(newPassword)) score++;
+                if (/[0-9]/.test(newPassword)) score++;
+                const cfg = [null,
+                  { label: 'Weak',   color: '#ef4444' },
+                  { label: 'Fair',   color: '#f97316' },
+                  { label: 'Good',   color: '#eab308' },
+                  { label: 'Strong', color: '#22c55e' },
+                ][score];
+                return (
+                  <div className="space-y-1.5 px-0.5">
+                    <div className="flex gap-1">
+                      {[1,2,3,4].map(i => (
+                        <div key={i} className="flex-1 h-1.5 rounded-full transition-all duration-300"
+                          style={{ background: i <= score ? cfg.color : 'hsl(var(--border))' }} />
+                      ))}
+                    </div>
+                    <p className="text-xs font-semibold" style={{ color: cfg.color }}>{cfg.label}</p>
+                  </div>
+                );
+              })()}
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <input
