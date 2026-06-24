@@ -34,6 +34,8 @@ export default function Settings({ currentUser, profile, onProfileUpdate, curren
   const [deleteStep, setDeleteStep] = useState(0);
   const [deleting, setDeleting] = useState(false);
   const [pendingFontSize, setPendingFontSize] = useState(() => getSavedFontSize());
+  const [showColorTheme, setShowColorTheme] = useState(false);
+  const [showTextSize, setShowTextSize] = useState(false);
   const passwordRef = useRef(null);
 
   useEffect(() => {
@@ -273,74 +275,96 @@ export default function Settings({ currentUser, profile, onProfileUpdate, curren
 
         {/* Color themes */}
         <div className="card-brutal p-5 space-y-4">
-          <h2 className="font-bold text-sm uppercase tracking-wider text-muted-foreground">Color Theme</h2>
-          <div className="space-y-2">
-            {THEMES.map(t => (
-              <motion.button
-                key={t.id}
-                whileTap={{ scale: 0.97 }}
-                onClick={() => handleThemeChange(t.id)}
-                className={`w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-all ${
-                  currentTheme === t.id ? 'border-primary' : 'border-border bg-secondary'
-                }`}
-                style={currentTheme === t.id ? { background: 'hsl(var(--theme-accent-muted))', borderColor: 'hsl(var(--theme-accent))' } : {}}
-              >
-                <div className="w-8 h-8 rounded-full flex items-center justify-center text-lg bg-background border border-border">
-                  {t.label.split(' ')[0]}
-                </div>
-                <div className="flex-1">
-                  <p className="font-semibold text-sm">{t.label.split(' ').slice(1).join(' ')}</p>
-                  <p className="text-xs text-muted-foreground">{t.description}</p>
-                </div>
-                {currentTheme === t.id && (
-                  <Check size={16} style={{ color: 'hsl(var(--theme-accent))' }} />
-                )}
-              </motion.button>
-            ))}
-          </div>
+          <button
+            type="button"
+            onClick={() => setShowColorTheme(v => !v)}
+            className="w-full flex items-center justify-between"
+          >
+            <h2 className="font-bold text-sm uppercase tracking-wider text-muted-foreground">Color Theme</h2>
+            <motion.span animate={{ rotate: showColorTheme ? 180 : 0 }} transition={{ duration: 0.2 }}>
+              <ChevronDown size={18} className="text-muted-foreground" />
+            </motion.span>
+          </button>
+          {showColorTheme && (
+            <div className="space-y-2">
+              {THEMES.map(t => (
+                <motion.button
+                  key={t.id}
+                  whileTap={{ scale: 0.97 }}
+                  onClick={() => handleThemeChange(t.id)}
+                  className={`w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-all ${
+                    currentTheme === t.id ? 'border-primary' : 'border-border bg-secondary'
+                  }`}
+                  style={currentTheme === t.id ? { background: 'hsl(var(--theme-accent-muted))', borderColor: 'hsl(var(--theme-accent))' } : {}}
+                >
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center text-lg bg-background border border-border">
+                    {t.label.split(' ')[0]}
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-semibold text-sm">{t.label.split(' ').slice(1).join(' ')}</p>
+                    <p className="text-xs text-muted-foreground">{t.description}</p>
+                  </div>
+                  {currentTheme === t.id && (
+                    <Check size={16} style={{ color: 'hsl(var(--theme-accent))' }} />
+                  )}
+                </motion.button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Font size */}
         <div className="card-brutal p-5 space-y-4">
-          <div>
-            <h2 className="font-bold text-sm uppercase tracking-wider text-muted-foreground">Text Size</h2>
-            <p className="text-xs text-muted-foreground mt-1">Select a size, then tap Apply to update the whole app.</p>
-          </div>
-          <div className="space-y-2">
-            {FONT_SIZES.map(s => (
-              <motion.button
-                key={s.id}
-                whileTap={{ scale: 0.97 }}
-                onClick={() => setPendingFontSize(s.id)}
-                className="w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-all"
-                style={pendingFontSize === s.id
-                  ? { background: 'hsl(var(--theme-accent-muted))', borderColor: 'hsl(var(--theme-accent))' }
-                  : { background: 'hsl(var(--secondary))', borderColor: 'hsl(var(--border))' }}
-              >
-                <div
-                  className="w-12 h-12 rounded-lg flex items-center justify-center font-bold bg-background border border-border flex-shrink-0"
-                  style={{ fontSize: `${s.px}px`, lineHeight: 1 }}
-                >
-                  Aa
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-sm">{s.label}</p>
-                  <p className="text-xs text-muted-foreground">{s.description}</p>
-                </div>
-                {pendingFontSize === s.id && (
-                  <Check size={16} style={{ color: 'hsl(var(--theme-accent))' }} />
-                )}
-              </motion.button>
-            ))}
-          </div>
-          <motion.button
-            whileTap={{ scale: 0.96 }}
-            onClick={handleApplyFontSize}
-            className="w-full py-3 rounded-lg font-bold text-sm"
-            style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
+          <button
+            type="button"
+            onClick={() => setShowTextSize(v => !v)}
+            className="w-full flex items-center justify-between"
           >
-            Apply
-          </motion.button>
+            <h2 className="font-bold text-sm uppercase tracking-wider text-muted-foreground">Text Size</h2>
+            <motion.span animate={{ rotate: showTextSize ? 180 : 0 }} transition={{ duration: 0.2 }}>
+              <ChevronDown size={18} className="text-muted-foreground" />
+            </motion.span>
+          </button>
+          {showTextSize && (
+            <>
+              <p className="text-xs text-muted-foreground -mt-2">Select a size, then tap Apply to update the whole app.</p>
+              <div className="space-y-2">
+                {FONT_SIZES.map(s => (
+                  <motion.button
+                    key={s.id}
+                    whileTap={{ scale: 0.97 }}
+                    onClick={() => setPendingFontSize(s.id)}
+                    className="w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-all"
+                    style={pendingFontSize === s.id
+                      ? { background: 'hsl(var(--theme-accent-muted))', borderColor: 'hsl(var(--theme-accent))' }
+                      : { background: 'hsl(var(--secondary))', borderColor: 'hsl(var(--border))' }}
+                  >
+                    <div
+                      className="w-12 h-12 rounded-lg flex items-center justify-center font-bold bg-background border border-border flex-shrink-0"
+                      style={{ fontSize: `${s.px}px`, lineHeight: 1 }}
+                    >
+                      Aa
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm">{s.label}</p>
+                      <p className="text-xs text-muted-foreground">{s.description}</p>
+                    </div>
+                    {pendingFontSize === s.id && (
+                      <Check size={16} style={{ color: 'hsl(var(--theme-accent))' }} />
+                    )}
+                  </motion.button>
+                ))}
+              </div>
+              <motion.button
+                whileTap={{ scale: 0.96 }}
+                onClick={handleApplyFontSize}
+                className="w-full py-3 rounded-lg font-bold text-sm"
+                style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
+              >
+                Apply
+              </motion.button>
+            </>
+          )}
         </div>
 
         {/* Password section — always visible */}
