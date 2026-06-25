@@ -3,7 +3,7 @@ import { api, supabase } from '@/api/supabaseClient';
 import { motion, AnimatePresence } from 'framer-motion';
 import Avatar from '@/components/Avatar';
 const ChatPicker = lazy(() => import('@/components/ChatPicker'));
-import { Send, ArrowLeft, Pencil, Trash2, Check, X as XIcon, Smile } from 'lucide-react';
+import { Send, ArrowLeft, Pencil, Trash2, Check, X as XIcon, Smile, Star } from 'lucide-react';
 import { haptic } from '@/lib/haptic';
 
 function formatTime(dateStr) {
@@ -28,6 +28,8 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
   const [unreadCounts, setUnreadCounts] = useState({});
   const [lastActivity, setLastActivity] = useState({});
   const [activeMessageId, setActiveMessageId] = useState(null);
+  const [savingSticker, setSavingSticker] = useState(null);
+  const [stickerSavedMsg, setStickerSavedMsg] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState(null);
   const [editText, setEditText] = useState('');
   const [typingPartners, setTypingPartners] = useState({});
@@ -268,6 +270,26 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     await api.entities.ChatMessage.update(msg.id, { is_deleted: true });
   }
 
+  async function saveStickerToMine(stickerUrl) {
+    setSavingSticker(stickerUrl);
+    try {
+      const marker = '/object/public/uploads/';
+      const idx = stickerUrl.indexOf(marker);
+      if (idx === -1) throw new Error('Cannot save this sticker');
+      const sourcePath = stickerUrl.slice(idx + marker.length);
+      const filename = sourcePath.split('/').pop();
+      const destPath = `stickers/${currentUser.id}/${Date.now()}_${filename}`;
+      const { error } = await supabase.storage.from('uploads').copy(sourcePath, destPath);
+      if (error) throw error;
+      setActiveMessageId(null);
+      setStickerSavedMsg(true);
+      setTimeout(() => setStickerSavedMsg(false), 2500);
+    } catch (err) {
+      console.error('Failed to save sticker:', err);
+    }
+    setSavingSticker(null);
+  }
+
   const handleMsgPointerDown = useCallback((msgId, canAct) => {
     if (!canAct) return;
     longPressActivated.current = false;
@@ -353,6 +375,11 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
 
     return (
       <div className="flex flex-col h-full bg-background">
+        {stickerSavedMsg && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 px-4 py-2 rounded-full bg-yellow-500/20 border border-yellow-500/30 text-yellow-600 dark:text-yellow-400 text-sm font-semibold shadow-lg pointer-events-none">
+            <Star size={13} /> Saved to Mine!
+          </div>
+        )}
         {/* Header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-border flex-shrink-0">
           <motion.button
@@ -403,6 +430,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
             const ageMs = Date.now() - new Date(msg.created_at).getTime();
             const canEdit = isMe && !msg.is_deleted && msg.message_type === 'text' && ageMs < 5 * 60 * 1000;
             const canDelete = isMe && !msg.is_deleted && msg.message_type !== 'system' && ageMs < 30 * 60 * 1000;
+            const canSaveSticker = !isMe && msg.message_type === 'sticker' && !msg.is_deleted;
             const showActions = activeMessageId === msg.id && !editingMessageId;
             const isEditing = editingMessageId === msg.id;
 
@@ -416,11 +444,11 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                 {(msg.message_type === 'gif' || msg.message_type === 'sticker') && !msg.is_deleted ? (
                   <div
                     className={`max-w-[220px] rounded-2xl overflow-hidden ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
-                    style={{ cursor: canDelete ? 'pointer' : 'default', userSelect: 'none' }}
-                    onPointerDown={() => handleMsgPointerDown(msg.id, canDelete)}
+                    style={{ cursor: (canDelete || canSaveSticker) ? 'pointer' : 'default', userSelect: 'none' }}
+                    onPointerDown={() => handleMsgPointerDown(msg.id, canDelete || canSaveSticker)}
                     onPointerUp={handleMsgPointerUp}
                     onPointerCancel={handleMsgPointerUp}
-                    onClick={() => handleMsgClick(msg.id, canDelete)}
+                    onClick={() => handleMsgClick(msg.id, canDelete || canSaveSticker)}
                   >
                     <img
                       src={msg.content}
@@ -480,6 +508,16 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                 )}
                 {showActions && (
                   <div className="flex gap-1.5 mt-1">
+                    {canSaveSticker && (
+                      <button
+                        onClick={() => saveStickerToMine(msg.content)}
+                        disabled={savingSticker === msg.content}
+                        className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full disabled:opacity-50"
+                        style={{ background: 'rgba(234,179,8,0.15)', color: '#ca8a04' }}
+                      >
+                        <Star size={10} /> Save
+                      </button>
+                    )}
                     {canEdit && (
                       <button
                         onClick={() => { setEditText(msg.content); setEditingMessageId(msg.id); setActiveMessageId(null); }}

@@ -76,8 +76,12 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
       const userRules = allRules.filter(r => r.user_id === userId);
       const userPosts = allPosts.filter(p => p.user_id === userId);
 
-      // Best rule streak
-      const bestStreak = userRules.reduce((max, r) => Math.max(max, r.current_streak || 0), 0);
+      // Best rule streak — computed from last_slip_date to avoid stale DB value
+      const bestStreak = userRules.reduce((max, r) => {
+        const anchor = r.last_slip_date ? new Date(r.last_slip_date) : new Date(r.created_at);
+        const t = new Date(); t.setHours(0, 0, 0, 0); anchor.setHours(0, 0, 0, 0);
+        return Math.max(max, Math.max(0, Math.floor((t - anchor) / 86400000)));
+      }, 0);
 
       // Consecutive posting streak
       const postDates = [...new Set(userPosts.map(p => p.post_date))].sort().reverse();

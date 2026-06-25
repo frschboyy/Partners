@@ -1,13 +1,22 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Compass, Flame, Star, ChevronDown, UserX, Eye, AlertTriangle, Search } from 'lucide-react';
 
+function streakDays(rule) {
+  const anchor = rule.last_slip_date ? new Date(rule.last_slip_date) : new Date(rule.created_at);
+  const today = new Date();
+  const t = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const a = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate());
+  return Math.max(0, Math.floor((t - a) / 86400000));
+}
+
 function computeVibeScore(rules, activePartnersCount) {
   if (rules.length === 0) return 0.0;
-  const overallStreak = Math.min(...rules.map(r => r.current_streak || 0));
+  const streaks = rules.map(r => streakDays(r));
+  const overallStreak = Math.min(...streaks);
   const streakPts = Math.min(overallStreak / 14, 1) * 4;
-  const ratioSum = rules.reduce((sum, r) => {
+  const ratioSum = rules.reduce((sum, r, i) => {
     if (!r.longest_streak) return sum;
-    return sum + Math.min((r.current_streak || 0) / r.longest_streak, 1);
+    return sum + Math.min(streaks[i] / r.longest_streak, 1);
   }, 0);
   const ratioPts = (ratioSum / rules.length) * 3;
   const rulePts = Math.min(rules.length / 5, 1) * 1;

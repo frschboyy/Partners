@@ -20,7 +20,11 @@ export default function RuleCard({ rule, onDeleted }) {
   }
 
   const emoji = rule.emoji || getGoalEmoji(rule.category);
-  const streak = rule.current_streak || 0;
+  const anchor = rule.last_slip_date ? new Date(rule.last_slip_date) : new Date(rule.created_at);
+  const today = new Date();
+  const t = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const a = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate());
+  const streak = Math.max(0, Math.floor((t - a) / 86400000));
 
   return (
     <motion.div layout className="card-brutal p-3 flex flex-col gap-1">
