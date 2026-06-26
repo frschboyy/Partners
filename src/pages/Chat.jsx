@@ -3,7 +3,7 @@ import { api, supabase } from '@/api/supabaseClient';
 import { motion, AnimatePresence } from 'framer-motion';
 import Avatar from '@/components/Avatar';
 const ChatPicker = lazy(() => import('@/components/ChatPicker'));
-import { Send, ArrowLeft, Pencil, Trash2, Check, X as XIcon, Smile, Star } from 'lucide-react';
+import { Send, ArrowLeft, Pencil, Trash2, Check, X as XIcon, Smile, Star, CornerUpLeft, Copy, MoreVertical } from 'lucide-react';
 import { haptic } from '@/lib/haptic';
 
 function formatTime(dateStr) {
@@ -33,11 +33,25 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
   const [partnerLastReadAt, setPartnerLastReadAt] = useState(null);
   const [editingMessageId, setEditingMessageId] = useState(null);
   const [editText, setEditText] = useState('');
+  // Reply
+  const [replyingTo, setReplyingTo] = useState(null);
+  // Delete-for-me (client-side hidden set)
+  const [hiddenMsgIds, setHiddenMsgIds] = useState(new Set());
+  // Sticker preview
+  const [stickerPreview, setStickerPreview] = useState(null);
+  const [mineFilenames, setMineFilenames] = useState(new Set());
+  // Per-message ⋮ dropdown
+  const [menuMsgId, setMenuMsgId] = useState(null);
+  // Show delete submenu in action bar
+  const [showDeleteMenu, setShowDeleteMenu] = useState(false);
+  // Copied feedback
+  const [copiedFeedback, setCopiedFeedback] = useState(false);
   const [typingPartners, setTypingPartners] = useState({});
   const [showPicker, setShowPicker] = useState(false);
   const bottomRef = useRef(null);
   const pickerRef = useRef(null);
   const selectedPartnershipRef = useRef(null);
+  const msgRefs = useRef({});
   const typingChannelsRef = useRef({});
   const typingTimersRef = useRef({});
   const typingThrottleRef = useRef(null);
@@ -133,7 +147,9 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
       : selectedPartnership.user_a_id;
     setMessages([]);
     setPartnerLastReadAt(null);
+    setReplyingTo(null);
     loadMessages(pid, pId);
+    loadMineFilenames();
 
     const channel = supabase
       .channel(`chat-${pid}`)
@@ -277,6 +293,75 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     }
   }
 
+  async function loadMineFilenames() {
+    try {
+      const { data } = await supabase.storage.from('uploads')
+        .list(`stickers/${currentUser.id}`, { limit: 200 });
+      setMineFilenames(new Set(
+        (data || []).filter(f => f.name !== '.emptyFolderPlaceholder').map(f => f.name)
+      ));
+    } catch {}
+  }
+
+  function isStickerInMine(url) {
+    const raw = decodeURIComponent(url.split('/').pop()?.split('?')[0] || '');
+    if (mineFilenames.has(raw)) return true;
+    return [...mineFilenames].some(n => n.endsWith('_' + raw) || raw.endsWith('_' + n));
+  }
+
+  function scrollToMessage(msgId) {
+    msgRefs.current[msgId]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  async function copyMessage(msg) {
+    try { await navigator.clipboard.writeText(msg.content || ''); } catch {}
+    setActiveMessageId(null);
+    setMenuMsgId(null);
+    setCopiedFeedback(true);
+    setTimeout(() => setCopiedFeedback(false), 1800);
+  }
+
+  function deleteForMe(msg) {
+    setActiveMessageId(null);
+    setMenuMsgId(null);
+    setHiddenMsgIds(prev => new Set([...prev, msg.id]));
+  }
+
+  async function addStickerToMineWeb(url) {
+    setSavingSticker(url);
+    try {
+      const marker = '/object/public/uploads/';
+      const idx = url.indexOf(marker);
+      if (idx === -1) throw new Error('Cannot save this sticker');
+      const sourcePath = url.slice(idx + marker.length);
+      const filename = sourcePath.split('/').pop();
+      const destName = `${Date.now()}_${filename}`;
+      const { error } = await supabase.storage.from('uploads').copy(sourcePath, `stickers/${currentUser.id}/${destName}`);
+      if (error) throw error;
+      setMineFilenames(prev => new Set([...prev, destName]));
+      setStickerPreview(null);
+      setStickerSavedMsg(true);
+      setTimeout(() => setStickerSavedMsg(false), 2500);
+    } catch (err) {
+      console.error('Failed to save sticker:', err);
+    }
+    setSavingSticker(null);
+  }
+
+  async function removeFromMineWeb(url) {
+    const raw = decodeURIComponent(url.split('/').pop()?.split('?')[0] || '');
+    const match = mineFilenames.has(raw) ? raw
+      : [...mineFilenames].find(n => n.endsWith('_' + raw) || raw.endsWith('_' + n));
+    if (!match) { setStickerPreview(null); return; }
+    try {
+      await supabase.storage.from('uploads').remove([`stickers/${currentUser.id}/${match}`]);
+      setMineFilenames(prev => { const s = new Set(prev); s.delete(match); return s; });
+      setStickerPreview(null);
+    } catch (err) {
+      console.error('Failed to remove sticker:', err);
+    }
+  }
+
   async function saveEdit(msg) {
     const trimmed = editText.trim();
     if (!trimmed || trimmed === msg.content) { setEditingMessageId(null); return; }
@@ -339,15 +424,26 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     return () => document.removeEventListener('mousedown', onMouseDown);
   }, [showPicker]);
 
+  // Close ⋮ dropdown when clicking elsewhere
+  useEffect(() => {
+    if (!menuMsgId) return;
+    function onMouseDown() { setMenuMsgId(null); }
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
+  }, [menuMsgId]);
+
   async function sendMedia(previewUrl, fullUrl, type) {
     if (!selectedPartnership) return;
     setShowPicker(false);
+    const replyId = replyingTo?.id || null;
+    setReplyingTo(null);
     await api.entities.ChatMessage.create({
       partnership_id: selectedPartnership.id,
       sender_id: currentUser.id,
       sender_name: profile?.display_name || currentUser.full_name,
       content: fullUrl || previewUrl,
       message_type: type,
+      reply_to_id: replyId,
     });
   }
 
@@ -356,7 +452,9 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     haptic([10]);
     setSending(true);
     const content = text.trim();
+    const replyId = replyingTo?.id || null;
     setText('');
+    setReplyingTo(null);
     clearTimeout(typingThrottleRef.current);
     const ch = typingChannelsRef.current[selectedPartnership.id];
     if (ch) ch.track({ user_id: currentUser.id, isTyping: false });
@@ -367,6 +465,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
         sender_name: profile?.display_name || currentUser.full_name,
         content,
         message_type: 'text',
+        reply_to_id: replyId,
       });
       // Only add if not already added by the subscription (dedupe by id)
       setMessages(prev => {
@@ -399,21 +498,130 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
             <Star size={13} /> Saved to Mine!
           </div>
         )}
-        {/* Header */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-border flex-shrink-0">
-          <motion.button
-            whileTap={{ scale: 0.85, opacity: 0.7 }}
-            onClick={() => setSelectedPartnership(null)}
-            className="p-2.5 rounded-full bg-secondary"
-          >
-            <ArrowLeft size={18} />
-          </motion.button>
-          <Avatar profile={partnerProfile} size="sm" noAutoFlip />
-          <div>
-            <p className="font-bold">{partnerName}</p>
-            <p className="text-xs text-muted-foreground">Accountability partner</p>
+        {copiedFeedback && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 px-4 py-2 rounded-full bg-secondary border border-border text-sm text-muted-foreground shadow-lg pointer-events-none">
+            Copied to clipboard
           </div>
-        </div>
+        )}
+
+        {/* Sticker preview modal */}
+        <AnimatePresence>
+          {stickerPreview && (
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="absolute inset-0 z-50 flex items-center justify-center"
+              style={{ background: 'rgba(0,0,0,0.85)' }}
+              onClick={() => setStickerPreview(null)}
+            >
+              <motion.div
+                initial={{ scale: 0.85 }} animate={{ scale: 1 }} exit={{ scale: 0.85 }}
+                className="flex flex-col items-center gap-5 p-6"
+                onClick={e => e.stopPropagation()}
+              >
+                <img src={stickerPreview.content} alt="sticker" style={{ width: 220, height: 220, objectFit: 'contain' }} />
+                {isStickerInMine(stickerPreview.content) ? (
+                  <button
+                    onClick={() => removeFromMineWeb(stickerPreview.content)}
+                    className="px-6 py-2.5 rounded-xl text-sm font-semibold border transition-colors"
+                    style={{ background: 'rgba(239,68,68,0.12)', color: '#ef4444', borderColor: 'rgba(239,68,68,0.3)' }}
+                  >
+                    Remove from Mine
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => addStickerToMineWeb(stickerPreview.content)}
+                    disabled={!!savingSticker}
+                    className="px-6 py-2.5 rounded-xl text-sm font-semibold disabled:opacity-50 transition-opacity"
+                    style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
+                  >
+                    {savingSticker ? '…' : 'Add to Mine ⭐'}
+                  </button>
+                )}
+                <button onClick={() => setStickerPreview(null)} className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+                  Close
+                </button>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Header — replaced by action bar when activeMessageId is set */}
+        {activeMessageId && !editingMessageId ? (() => {
+          const sm = messages.find(m => m.id === activeMessageId);
+          if (!sm) return null;
+          const smIsMe = sm.sender_id === currentUser.id;
+          const smAge = Date.now() - new Date(sm.created_at).getTime();
+          const smCanEdit = smIsMe && !sm.is_deleted && sm.message_type === 'text' && smAge < 5 * 60 * 1000;
+          const smCanDelAll = smIsMe && !sm.is_deleted && smAge < 30 * 60 * 1000;
+          const smCanReply = !sm.is_deleted && sm.message_type !== 'system';
+          const smCanCopy = !sm.is_deleted && sm.message_type === 'text';
+          return (
+            <div className="flex items-center gap-2 px-3 py-3 border-b border-border flex-shrink-0">
+              <button
+                onClick={() => { setActiveMessageId(null); setShowDeleteMenu(false); }}
+                className="p-2 rounded-full bg-secondary hover:opacity-75 transition-opacity"
+              >
+                <XIcon size={17} />
+              </button>
+              <span className="flex-1 text-sm font-semibold text-foreground ml-1">1 selected</span>
+              {smCanReply && (
+                <button onClick={() => { setReplyingTo(sm); setActiveMessageId(null); }}
+                  className="p-2.5 rounded-full bg-secondary hover:opacity-75 transition-opacity" title="Reply">
+                  <CornerUpLeft size={16} />
+                </button>
+              )}
+              {smCanCopy && (
+                <button onClick={() => copyMessage(sm)}
+                  className="p-2.5 rounded-full bg-secondary hover:opacity-75 transition-opacity" title="Copy">
+                  <Copy size={16} />
+                </button>
+              )}
+              {smCanEdit && (
+                <button onClick={() => { setEditText(sm.content); setEditingMessageId(sm.id); setActiveMessageId(null); }}
+                  className="p-2.5 rounded-full bg-secondary hover:opacity-75 transition-opacity" title="Edit">
+                  <Pencil size={16} />
+                </button>
+              )}
+              {!showDeleteMenu ? (
+                <button onClick={() => setShowDeleteMenu(true)}
+                  className="p-2.5 rounded-full bg-secondary hover:opacity-75 transition-opacity" title="Delete"
+                  style={{ color: 'hsl(var(--destructive))' }}>
+                  <Trash2 size={16} />
+                </button>
+              ) : (
+                <div className="flex gap-1.5">
+                  {smCanDelAll && (
+                    <button
+                      onClick={async () => { const m = sm; setActiveMessageId(null); setShowDeleteMenu(false); await deleteMessage(m); }}
+                      className="text-[11px] font-semibold px-2.5 py-1.5 rounded-full transition-opacity hover:opacity-80"
+                      style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444' }}
+                    >For All</button>
+                  )}
+                  <button
+                    onClick={() => deleteForMe(sm)}
+                    className="text-[11px] font-semibold px-2.5 py-1.5 rounded-full transition-opacity hover:opacity-80"
+                    style={{ background: 'rgba(239,68,68,0.08)', color: '#ef4444' }}
+                  >For Me</button>
+                </div>
+              )}
+            </div>
+          );
+        })() : (
+          <div className="flex items-center gap-3 px-4 py-3 border-b border-border flex-shrink-0">
+            <motion.button
+              whileTap={{ scale: 0.85, opacity: 0.7 }}
+              onClick={() => setSelectedPartnership(null)}
+              className="p-2.5 rounded-full bg-secondary"
+            >
+              <ArrowLeft size={18} />
+            </motion.button>
+            <Avatar profile={partnerProfile} size="sm" noAutoFlip />
+            <div>
+              <p className="font-bold">{partnerName}</p>
+              <p className="text-xs text-muted-foreground">Accountability partner</p>
+            </div>
+          </div>
+        )}
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -444,32 +652,57 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
               <p className="text-sm text-muted-foreground text-center">Chat is open. Say something →</p>
             </div>
           ) : null}
-          {messages.map(msg => {
+          {messages.filter(msg => !hiddenMsgIds.has(msg.id)).map(msg => {
             const isMe = msg.sender_id === currentUser.id;
             const ageMs = Date.now() - new Date(msg.created_at).getTime();
             const canEdit = isMe && !msg.is_deleted && msg.message_type === 'text' && ageMs < 5 * 60 * 1000;
             const canDelete = isMe && !msg.is_deleted && msg.message_type !== 'system' && ageMs < 30 * 60 * 1000;
-            const canSaveSticker = !isMe && msg.message_type === 'sticker' && !msg.is_deleted;
-            const showActions = activeMessageId === msg.id && !editingMessageId;
+            const canSaveSticker = !isMe && (msg.message_type === 'sticker') && !msg.is_deleted;
+            const canAct = canEdit || canDelete || canSaveSticker || (!msg.is_deleted && msg.message_type !== 'system');
+            const showMenu = menuMsgId === msg.id;
             const isEditing = editingMessageId === msg.id;
             const isRead = isMe && !!partnerLastReadAt && new Date(msg.created_at) <= new Date(partnerLastReadAt);
+            const replyTo = msg.reply_to_id ? messages.find(m => m.id === msg.reply_to_id) : null;
 
             return (
               <motion.div
                 key={msg.id}
+                ref={el => { msgRefs.current[msg.id] = el; }}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
+                className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group`}
+                style={activeMessageId === msg.id ? { background: 'hsl(var(--theme-accent) / 0.06)', borderRadius: 12, margin: '0 -8px', padding: '2px 8px' } : {}}
+                onContextMenu={e => { e.preventDefault(); if (canAct) { setActiveMessageId(msg.id); setShowDeleteMenu(false); } }}
               >
+                {/* Reply-to reference */}
+                {replyTo && !hiddenMsgIds.has(replyTo.id) && (
+                  <button
+                    onClick={() => scrollToMessage(replyTo.id)}
+                    className={`max-w-[72%] text-left px-2.5 py-1.5 rounded-xl mb-1 border-l-2 transition-opacity hover:opacity-80`}
+                    style={{ background: 'hsl(var(--theme-accent) / 0.07)', borderLeftColor: 'hsl(var(--theme-accent))' }}
+                  >
+                    <p className="text-[10px] font-semibold" style={{ color: 'hsl(var(--theme-accent))' }}>
+                      {replyTo.sender_id === currentUser.id ? 'You' : partnerName}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground truncate">
+                      {replyTo.message_type === 'sticker' || replyTo.message_type === 'gif' ? '✨ Sticker' : replyTo.content}
+                    </p>
+                  </button>
+                )}
+
+                {/* Sticker / GIF */}
                 {(msg.message_type === 'gif' || msg.message_type === 'sticker') && !msg.is_deleted ? (
                   <>
                     <div
-                      className={`max-w-[220px] rounded-2xl overflow-hidden ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
-                      style={{ cursor: (canDelete || canSaveSticker) ? 'pointer' : 'default', userSelect: 'none' }}
-                      onPointerDown={() => handleMsgPointerDown(msg.id, canDelete || canSaveSticker)}
+                      className={`relative max-w-[220px] rounded-2xl overflow-hidden ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
+                      style={{ cursor: 'pointer', userSelect: 'none' }}
+                      onPointerDown={() => handleMsgPointerDown(msg.id, canAct)}
                       onPointerUp={handleMsgPointerUp}
                       onPointerCancel={handleMsgPointerUp}
-                      onClick={() => handleMsgClick(msg.id, canDelete || canSaveSticker)}
+                      onClick={() => {
+                        if (longPressActivated.current) { longPressActivated.current = false; return; }
+                        setStickerPreview(msg);
+                      }}
                     >
                       <img
                         src={msg.content}
@@ -478,6 +711,15 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                         style={{ maxHeight: msg.message_type === 'sticker' ? 120 : 160, objectFit: 'cover', display: 'block' }}
                         loading="lazy"
                       />
+                      {/* ⋮ button */}
+                      {canAct && (
+                        <button
+                          onClick={e => { e.stopPropagation(); setMenuMsgId(prev => prev === msg.id ? null : msg.id); }}
+                          className="absolute top-1 right-1 p-0.5 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/60"
+                        >
+                          <MoreVertical size={13} color="white" />
+                        </button>
+                      )}
                     </div>
                     {isMe && (
                       <div className="flex items-center justify-end gap-0.5 mt-0.5 px-0.5">
@@ -487,19 +729,30 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                     )}
                   </>
                 ) : (
+                  /* Text / system bubble */
                   <div
-                    className={`max-w-[78%] px-3.5 py-2.5 rounded-2xl ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
+                    className={`relative max-w-[78%] px-3.5 py-2.5 rounded-2xl ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
                     style={{
                       background: isMe ? 'hsl(var(--theme-accent))' : 'hsl(var(--secondary))',
                       color: isMe ? 'hsl(var(--theme-accent-fg))' : 'hsl(var(--foreground))',
-                      cursor: (canEdit || canDelete) ? 'pointer' : 'default',
+                      cursor: canAct ? 'pointer' : 'default',
                       userSelect: 'none',
                     }}
-                    onPointerDown={() => handleMsgPointerDown(msg.id, canEdit || canDelete)}
+                    onPointerDown={() => handleMsgPointerDown(msg.id, canAct)}
                     onPointerUp={handleMsgPointerUp}
                     onPointerCancel={handleMsgPointerUp}
-                    onClick={() => handleMsgClick(msg.id, canEdit || canDelete)}
+                    onClick={() => handleMsgClick(msg.id, canAct)}
                   >
+                    {/* ⋮ dropdown trigger */}
+                    {canAct && !msg.is_deleted && msg.message_type !== 'system' && (
+                      <button
+                        onClick={e => { e.stopPropagation(); setMenuMsgId(prev => prev === msg.id ? null : msg.id); }}
+                        className={`absolute top-1.5 ${isMe ? 'left-1.5' : 'right-1.5'} p-0.5 rounded-full opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity`}
+                        style={{ color: isMe ? 'hsl(var(--theme-accent-fg))' : 'hsl(var(--foreground))' }}
+                      >
+                        <MoreVertical size={13} />
+                      </button>
+                    )}
                     {msg.is_deleted ? (
                       <p className="text-xs italic opacity-50">Message deleted</p>
                     ) : msg.message_type === 'system' ? (
@@ -542,35 +795,61 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                     )}
                   </div>
                 )}
-                {showActions && (
-                  <div className="flex gap-1.5 mt-1">
+
+                {/* ⋮ context dropdown menu */}
+                {showMenu && (
+                  <div
+                    className={`flex flex-col gap-0.5 mt-1 min-w-[140px] rounded-xl border border-border shadow-lg overflow-hidden z-20`}
+                    style={{ background: 'hsl(var(--popover))' }}
+                    onClick={e => e.stopPropagation()}
+                  >
+                    {!msg.is_deleted && msg.message_type !== 'system' && (
+                      <button
+                        onClick={() => { setReplyingTo(msg); setMenuMsgId(null); }}
+                        className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary transition-colors text-left"
+                      >
+                        <CornerUpLeft size={13} /> Reply
+                      </button>
+                    )}
+                    {!msg.is_deleted && msg.message_type === 'text' && (
+                      <button
+                        onClick={() => copyMessage(msg)}
+                        className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary transition-colors text-left"
+                      >
+                        <Copy size={13} /> Copy
+                      </button>
+                    )}
                     {canSaveSticker && (
                       <button
-                        onClick={() => saveStickerToMine(msg.content)}
-                        disabled={savingSticker === msg.content}
-                        className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full disabled:opacity-50"
-                        style={{ background: 'rgba(234,179,8,0.15)', color: '#ca8a04' }}
+                        onClick={() => { setStickerPreview(msg); setMenuMsgId(null); }}
+                        className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary transition-colors text-left"
+                        style={{ color: '#ca8a04' }}
                       >
-                        <Star size={10} /> Save
+                        <Star size={13} /> Save to Mine
                       </button>
                     )}
                     {canEdit && (
                       <button
-                        onClick={() => { setEditText(msg.content); setEditingMessageId(msg.id); setActiveMessageId(null); }}
-                        className="flex items-center gap-1 text-[11px] text-muted-foreground bg-secondary px-2.5 py-1 rounded-full"
+                        onClick={() => { setEditText(msg.content); setEditingMessageId(msg.id); setMenuMsgId(null); }}
+                        className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary transition-colors text-left"
                       >
-                        <Pencil size={10} /> Edit
+                        <Pencil size={13} /> Edit
                       </button>
                     )}
                     {canDelete && (
                       <button
-                        onClick={() => deleteMessage(msg)}
-                        className="flex items-center gap-1 text-[11px] text-destructive px-2.5 py-1 rounded-full"
-                        style={{ background: 'hsl(var(--destructive) / 0.1)' }}
+                        onClick={() => { deleteMessage(msg); setMenuMsgId(null); }}
+                        className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary transition-colors text-left text-destructive"
                       >
-                        <Trash2 size={10} /> Delete
+                        <Trash2 size={13} /> Delete for All
                       </button>
                     )}
+                    <button
+                      onClick={() => deleteForMe(msg)}
+                      className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary transition-colors text-left text-destructive"
+                    >
+                      <Trash2 size={13} /> Delete for Me
+                    </button>
                   </div>
                 )}
               </motion.div>
@@ -598,6 +877,25 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
           )}
           <div ref={bottomRef} />
         </div>
+
+        {/* Reply composer */}
+        {replyingTo && (
+          <div className="flex items-center gap-2 px-4 py-2 border-t border-border flex-shrink-0"
+            style={{ borderLeftWidth: 3, borderLeftColor: 'hsl(var(--theme-accent))' }}>
+            <div className="flex-1 min-w-0">
+              <p className="text-[11px] font-semibold" style={{ color: 'hsl(var(--theme-accent))' }}>
+                {replyingTo.sender_id === currentUser.id ? 'Replying to yourself' : `Replying to ${partnerName}`}
+              </p>
+              <p className="text-[11px] text-muted-foreground truncate">
+                {replyingTo.message_type === 'sticker' || replyingTo.message_type === 'gif'
+                  ? '✨ Sticker' : replyingTo.content}
+              </p>
+            </div>
+            <button onClick={() => setReplyingTo(null)} className="p-1 text-muted-foreground hover:text-foreground transition-colors flex-shrink-0">
+              <XIcon size={14} />
+            </button>
+          </div>
+        )}
 
         {/* Input — sits above bottom nav (nav is ~56px + safe area) */}
         <div className="relative flex-shrink-0 border-t border-border" ref={pickerRef}>
