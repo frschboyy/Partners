@@ -30,6 +30,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
   const [activeMessageId, setActiveMessageId] = useState(null);
   const [savingSticker, setSavingSticker] = useState(null);
   const [stickerSavedMsg, setStickerSavedMsg] = useState(false);
+  const [partnerLastReadAt, setPartnerLastReadAt] = useState(null);
   const [editingMessageId, setEditingMessageId] = useState(null);
   const [editText, setEditText] = useState('');
   const [typingPartners, setTypingPartners] = useState({});
@@ -127,8 +128,12 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
   useEffect(() => {
     if (!selectedPartnership) return;
     const pid = selectedPartnership.id;
+    const pId = selectedPartnership.user_a_id === currentUser.id
+      ? selectedPartnership.user_b_id
+      : selectedPartnership.user_a_id;
     setMessages([]);
-    loadMessages(pid);
+    setPartnerLastReadAt(null);
+    loadMessages(pid, pId);
 
     const channel = supabase
       .channel(`chat-${pid}`)
@@ -140,7 +145,6 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
           const data = type === 'DELETE' ? payload.old : payload.new;
 
           if (type === 'INSERT' && data.sender_id !== currentUser.id) {
-            // Advance read position so unread count stays at zero while the chat is open
             supabase
               .from('partnership_read_positions')
               .upsert(
@@ -162,12 +166,19 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
           });
         }
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'partnership_read_positions', filter: `partnership_id=eq.${pid}` },
+        payload => {
+          if (payload.new?.user_id === pId) {
+            setPartnerLastReadAt(payload.new.last_read_at);
+          }
+        }
+      )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
-      // Zero out the unread count for this chat when leaving so the dot clears
-      // immediately without waiting for a DB round-trip.
       setUnreadCounts(prev => ({ ...prev, [pid]: 0 }));
     };
   }, [selectedPartnership]);
@@ -238,12 +249,11 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     }
   }
 
-  async function loadMessages(partnershipId) {
+  async function loadMessages(partnershipId, partnerUserId) {
     setLoadingMessages(true);
     try {
       const msgs = await api.entities.ChatMessage.filter({ partnership_id: partnershipId }, 'created_at', 100);
       setMessages(msgs);
-      // Single upsert marks this chat as fully read — replaces N individual read_by updates
       await supabase
         .from('partnership_read_positions')
         .upsert(
@@ -251,6 +261,15 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
           { onConflict: 'partnership_id,user_id' }
         );
       setUnreadCounts(prev => ({ ...prev, [partnershipId]: 0 }));
+      if (partnerUserId) {
+        const { data: readPos } = await supabase
+          .from('partnership_read_positions')
+          .select('last_read_at')
+          .eq('partnership_id', partnershipId)
+          .eq('user_id', partnerUserId)
+          .maybeSingle();
+        setPartnerLastReadAt(readPos?.last_read_at || null);
+      }
     } catch (err) {
       console.error('Failed to load messages:', err);
     } finally {
@@ -433,6 +452,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
             const canSaveSticker = !isMe && msg.message_type === 'sticker' && !msg.is_deleted;
             const showActions = activeMessageId === msg.id && !editingMessageId;
             const isEditing = editingMessageId === msg.id;
+            const isRead = isMe && !!partnerLastReadAt && new Date(msg.created_at) <= new Date(partnerLastReadAt);
 
             return (
               <motion.div
@@ -442,22 +462,30 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                 className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
               >
                 {(msg.message_type === 'gif' || msg.message_type === 'sticker') && !msg.is_deleted ? (
-                  <div
-                    className={`max-w-[220px] rounded-2xl overflow-hidden ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
-                    style={{ cursor: (canDelete || canSaveSticker) ? 'pointer' : 'default', userSelect: 'none' }}
-                    onPointerDown={() => handleMsgPointerDown(msg.id, canDelete || canSaveSticker)}
-                    onPointerUp={handleMsgPointerUp}
-                    onPointerCancel={handleMsgPointerUp}
-                    onClick={() => handleMsgClick(msg.id, canDelete || canSaveSticker)}
-                  >
-                    <img
-                      src={msg.content}
-                      alt={msg.message_type}
-                      className="w-full"
-                      style={{ maxHeight: msg.message_type === 'sticker' ? 120 : 160, objectFit: 'cover', display: 'block' }}
-                      loading="lazy"
-                    />
-                  </div>
+                  <>
+                    <div
+                      className={`max-w-[220px] rounded-2xl overflow-hidden ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
+                      style={{ cursor: (canDelete || canSaveSticker) ? 'pointer' : 'default', userSelect: 'none' }}
+                      onPointerDown={() => handleMsgPointerDown(msg.id, canDelete || canSaveSticker)}
+                      onPointerUp={handleMsgPointerUp}
+                      onPointerCancel={handleMsgPointerUp}
+                      onClick={() => handleMsgClick(msg.id, canDelete || canSaveSticker)}
+                    >
+                      <img
+                        src={msg.content}
+                        alt={msg.message_type}
+                        className="w-full"
+                        style={{ maxHeight: msg.message_type === 'sticker' ? 120 : 160, objectFit: 'cover', display: 'block' }}
+                        loading="lazy"
+                      />
+                    </div>
+                    {isMe && (
+                      <div className="flex items-center justify-end gap-0.5 mt-0.5 px-0.5">
+                        <Check size={9} strokeWidth={3} style={{ color: 'hsl(var(--muted-foreground))', opacity: isRead ? 0.85 : 0.4 }} />
+                        {isRead && <Check size={9} strokeWidth={3} style={{ color: 'hsl(var(--muted-foreground))', opacity: 0.85, marginLeft: -4 }} />}
+                      </div>
+                    )}
+                  </>
                 ) : (
                   <div
                     className={`max-w-[78%] px-3.5 py-2.5 rounded-2xl ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
@@ -499,9 +527,17 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                     ) : (
                       <>
                         <p className="text-sm leading-relaxed">{msg.content}</p>
-                        <p className="text-[10px] opacity-60 mt-0.5 text-right">
-                          {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </p>
+                        <div className="flex items-center justify-end gap-0.5 mt-0.5">
+                          <span className="text-[10px] opacity-60">
+                            {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                          {isMe && (
+                            <>
+                              <Check size={9} strokeWidth={3} style={{ opacity: isRead ? 0.85 : 0.4 }} />
+                              {isRead && <Check size={9} strokeWidth={3} style={{ opacity: 0.85, marginLeft: -4 }} />}
+                            </>
+                          )}
+                        </div>
                       </>
                     )}
                   </div>

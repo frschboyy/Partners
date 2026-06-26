@@ -151,9 +151,7 @@ function MyStickersTab({ currentUser, onSelect }) {
             {stickers.map(s => (
               <div
                 key={s.name}
-                className="relative aspect-square bg-secondary rounded-lg overflow-hidden"
-                onMouseEnter={() => setHoveredId(s.name)}
-                onMouseLeave={() => setHoveredId(null)}
+                className="relative aspect-square bg-secondary rounded-lg overflow-hidden group"
               >
                 <button
                   onClick={() => onSelect(s.url, s.url)}
@@ -161,15 +159,13 @@ function MyStickersTab({ currentUser, onSelect }) {
                 >
                   <img src={s.url} alt="" className="w-full h-full object-contain p-1" loading="lazy" />
                 </button>
-                {hoveredId === s.name && (
-                  <button
-                    onClick={() => handleDelete(s.name)}
-                    className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white text-xs flex items-center justify-center leading-none hover:bg-black/80 transition-colors"
-                    title="Delete sticker"
-                  >
-                    ×
-                  </button>
-                )}
+                <button
+                  onClick={e => { e.stopPropagation(); handleDelete(s.name); }}
+                  className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white text-xs flex items-center justify-center leading-none opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity hover:bg-black/80"
+                  title="Remove sticker"
+                >
+                  ×
+                </button>
               </div>
             ))}
           </div>
