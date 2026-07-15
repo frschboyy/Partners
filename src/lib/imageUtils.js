@@ -62,6 +62,18 @@ function compressViaImageElement(file, maxDimension, quality) {
   });
 }
 
+// iPhone camera photos are HEIC/HEIF by default, and HEIC compresses well enough
+// that most shots land under the size threshold and would otherwise skip
+// re-encoding below. Safari/iOS decodes HEIC natively (WebKit has OS-level
+// codec support), so it looks fine on the phone that took it — but Chrome,
+// Firefox, and Edge have no HEIC decoder at all, so the raw file renders as a
+// broken image everywhere else. Unlike the size check, this isn't optional.
+function isHeicLike(file) {
+  const type = (file.type || '').toLowerCase();
+  const name = (file.name || '').toLowerCase();
+  return type.includes('heic') || type.includes('heif') || name.endsWith('.heic') || name.endsWith('.heif');
+}
+
 /**
  * Compresses an image File/Blob client-side before upload.
  * - Enforces maxSizeMB limit
@@ -71,8 +83,9 @@ function compressViaImageElement(file, maxDimension, quality) {
 export async function compressImage(file, { maxSizeMB = 2, maxDimension = 1920, quality = 0.82 } = {}) {
   const maxBytes = maxSizeMB * 1024 * 1024;
 
-  // If already small enough, skip compression entirely
-  if (file.size <= maxBytes) {
+  // If already small enough, skip compression entirely — unless it's HEIC/HEIF,
+  // which always needs re-encoding regardless of size (see isHeicLike above).
+  if (!isHeicLike(file) && file.size <= maxBytes) {
     return file;
   }
 

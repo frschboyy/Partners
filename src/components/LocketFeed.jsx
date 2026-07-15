@@ -116,15 +116,6 @@ export default function LocketFeed({
   return (
     <div className="relative w-full h-full overflow-hidden select-none">
 
-      {/* Post counter */}
-      {posts.length > 1 && (
-        <div className="absolute top-3 right-5 z-20 bg-black/40 backdrop-blur-sm px-2.5 py-1 rounded-full pointer-events-none">
-          <p className="text-[11px] font-semibold text-white tabular-nums">
-            {currentIndex + 1} / {posts.length}
-          </p>
-        </div>
-      )}
-
       {/* Scroll hint — overlays the bottom of the card so it's always visible */}
       <AnimatePresence>
         {showSwipeHint && nextPost && (
