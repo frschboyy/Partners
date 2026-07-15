@@ -107,6 +107,29 @@ function isMediaMsg(msg) {
   return msg?.message_type === 'sticker' || msg?.message_type === 'gif';
 }
 
+function isSameDay(a, b) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+// Deliberately computed fresh on every render rather than cached — this is what
+// makes "Today" roll over to "Yesterday" automatically as real time passes,
+// with zero extra bookkeeping.
+function formatDateSeparator(dateStr) {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const startOfDay = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const dayDiff = Math.round((startOfDay(now) - startOfDay(date)) / 86400000);
+
+  if (dayDiff === 0) return 'Today';
+  if (dayDiff === 1) return 'Yesterday';
+  if (dayDiff > 1 && dayDiff < 7) return date.toLocaleDateString(undefined, { weekday: 'long' });
+
+  const sameYear = date.getFullYear() === now.getFullYear();
+  return date.toLocaleDateString(undefined, sameYear
+    ? { month: 'long', day: 'numeric' }
+    : { month: 'long', day: 'numeric', year: 'numeric' });
+}
+
 export default function Chat({ currentUser, profile, onTabChange, navIntent, onClearNavIntent }) {
   const [partnerships, setPartnerships] = useState([]);
   const [loadingPartnerships, setLoadingPartnerships] = useState(true);
@@ -1016,7 +1039,9 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
               <p className="text-sm text-muted-foreground text-center">Chat is open. Say something →</p>
             </div>
           ) : null}
-          {messages.filter(msg => !hiddenMsgIds.has(msg.id)).map(msg => {
+          {messages.filter(msg => !hiddenMsgIds.has(msg.id)).map((msg, idx, visible) => {
+            const prevMsg = visible[idx - 1];
+            const showDateSeparator = !prevMsg || !isSameDay(new Date(msg.created_at), new Date(prevMsg.created_at));
             const perms = getMsgPermissions(msg);
             const { isMe, canAct, canReply } = perms;
             const isEditing = editingMessageId === msg.id;
@@ -1030,8 +1055,18 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
             const showChevronMenu = chevronMenuMsgId === msg.id;
 
             return (
-              <motion.div
-                key={msg.id}
+              <React.Fragment key={msg.id}>
+                {showDateSeparator && (
+                  <div className="flex justify-center my-3">
+                    <span
+                      className="px-3 py-1 rounded-full text-[11px] font-semibold text-muted-foreground"
+                      style={{ background: 'hsl(var(--secondary))' }}
+                    >
+                      {formatDateSeparator(msg.created_at)}
+                    </span>
+                  </div>
+                )}
+                <motion.div
                 ref={el => { msgRefs.current[msg.id] = el; }}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -1264,7 +1299,8 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                     </div>
                   )}
                 </motion.div>
-              </motion.div>
+                </motion.div>
+              </React.Fragment>
             );
           })}
           {typingPartners[selectedPartnership.id] && (
