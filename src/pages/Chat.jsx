@@ -59,38 +59,15 @@ function ChatMediaBubble({ src, alt, maxHeight, isExternal }) {
 
 const REACTION_BAR_HEIGHT = 48;
 const REACTION_GAP = 10;
-const MENU_GAP = 8;
-const MENU_ITEM_HEIGHT = 46;
 const HEADER_SAFE_TOP = 76;
-const COMPOSER_SAFE_BOTTOM = 100;
 const SWIPE_REPLY_THRESHOLD = 60;
 const SWIPE_REPLY_MAX = 72;
 
-// Positions the floating reaction bar + context menu around a message's measured
-// rect — below the message when there's room, flipping both above it otherwise,
-// always clamped to stay clear of the fixed header/composer and screen edges.
-function getOverlayLayout(rect, itemCount) {
+// Positions the floating reaction bar above a message's measured rect, clamped so
+// it never sits behind the fixed header.
+function getReactionBarTop(rect) {
   if (!rect) return null;
-  const vh = window.innerHeight;
-  const menuHeight = itemCount * MENU_ITEM_HEIGHT + 8;
-
-  const menuTopBelow = rect.bottom + MENU_GAP;
-  const fitsBelow = menuTopBelow + menuHeight <= vh - COMPOSER_SAFE_BOTTOM;
-
-  if (fitsBelow) {
-    return {
-      menuTop: menuTopBelow,
-      reactionTop: Math.max(rect.top - REACTION_GAP - REACTION_BAR_HEIGHT, HEADER_SAFE_TOP),
-      placement: 'below',
-    };
-  }
-
-  const menuTopAbove = Math.max(rect.top - MENU_GAP - menuHeight, HEADER_SAFE_TOP);
-  return {
-    menuTop: menuTopAbove,
-    reactionTop: Math.max(menuTopAbove - REACTION_GAP - REACTION_BAR_HEIGHT, HEADER_SAFE_TOP),
-    placement: 'above',
-  };
+  return Math.max(rect.top - REACTION_GAP - REACTION_BAR_HEIGHT, HEADER_SAFE_TOP);
 }
 
 function formatTime(dateStr) {
@@ -150,13 +127,16 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     setNavHiddenState(hidden);
     onHideNavChange?.(hidden);
   }
-  // Mobile long-press overlay (reaction bar + floating menu)
-  const [activeMessageId, setActiveMessageId] = useState(null);
-  const [actionRect, setActionRect] = useState(null);
+  // Unified message selection — the single source of truth behind long-press
+  // (mobile), double-click/right-click (desktop), and every subsequent tap once
+  // selection mode is active. Drives the header action bar and (when exactly one
+  // message is selected) the floating reaction bar.
+  const [selectedMessageIds, setSelectedMessageIds] = useState(() => new Set());
+  const [selectionAnchorRect, setSelectionAnchorRect] = useState(null);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
-  // Desktop-only: chevron dropdown + double-click select
+  // Desktop-only: small anchored dropdown for a quick single-message action,
+  // independent of the selection system above.
   const [chevronMenuMsgId, setChevronMenuMsgId] = useState(null);
-  const [selectedMessageId, setSelectedMessageId] = useState(null);
   const [savingSticker, setSavingSticker] = useState(null);
   const [stickerSavedMsg, setStickerSavedMsg] = useState(false);
   const [partnerLastReadAt, setPartnerLastReadAt] = useState(null);
@@ -244,8 +224,12 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
   // regardless of which conversation they currently have open.
   useEffect(() => {
     if (!currentUser) return;
+    // Random suffix avoids reusing a same-named channel that's still mid-teardown from
+    // a previous mount (e.g. switching away from and back to this tab) — Supabase's
+    // client caches channels by name, and calling .on() on an already-subscribed
+    // channel throws, which is exactly what surfaced as a crash on repeat tab switches.
     const channel = supabase
-      .channel(`chat-hidden-${currentUser.id}`)
+      .channel(`chat-hidden-${currentUser.id}-${Math.random().toString(36).slice(2)}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'chat_message_hidden', filter: `user_id=eq.${currentUser.id}` },
@@ -266,8 +250,9 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     partnerships.forEach(p => {
       const partnerId = p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id;
 
+      // Random suffix — same collision risk as the chat-hidden channel above.
       const ch = supabase
-        .channel(`typing-${p.id}`)
+        .channel(`typing-${p.id}-${Math.random().toString(36).slice(2)}`)
         .on('presence', { event: 'sync' }, () => {
           const state = ch.presenceState();
           const partnerTyping = Object.values(state)
@@ -312,8 +297,9 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     loadMessages(pid, pId);
     loadMineFilenames();
 
+    // Random suffix — same collision risk as the chat-hidden channel above.
     const channel = supabase
-      .channel(`chat-${pid}`)
+      .channel(`chat-${pid}-${Math.random().toString(36).slice(2)}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'chat_messages', filter: `partnership_id=eq.${pid}` },
@@ -402,16 +388,30 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     if (current?.is_deleted) setReplyingTo(null);
   }, [messages, replyingTo]);
 
-  // Desktop: Esc or a click outside the selected message clears the selection.
+  // Recomputes the floating reaction bar's anchor whenever the selection narrows
+  // to (or starts at, or is reduced back down to) exactly one message — cleared
+  // the moment it's anything other than exactly one.
   useEffect(() => {
-    if (!selectedMessageId) return;
-    function onKeyDown(e) { if (e.key === 'Escape') setSelectedMessageId(null); }
+    if (selectedMessageIds.size !== 1) { setSelectionAnchorRect(null); return; }
+    const soleId = [...selectedMessageIds][0];
+    const el = msgRefs.current[soleId];
+    if (el) setSelectionAnchorRect(el.getBoundingClientRect());
+  }, [selectedMessageIds]);
+
+  // Esc, or a click outside both the selected messages and the action bar itself,
+  // clears the selection. Checking against every selected row (not just one) is
+  // what makes this work correctly in multi-select, on both mobile and desktop.
+  useEffect(() => {
+    if (!selectedMessageIds.size) return;
+    function onKeyDown(e) { if (e.key === 'Escape') clearSelection(); }
     function onMouseDown(e) {
-      const rowEl = msgRefs.current[selectedMessageId];
       const barEl = headerActionBarRef.current;
-      const insideRow = rowEl && rowEl.contains(e.target);
-      const insideBar = barEl && barEl.contains(e.target);
-      if (!insideRow && !insideBar) setSelectedMessageId(null);
+      if (barEl && barEl.contains(e.target)) return;
+      const insideAnySelected = [...selectedMessageIds].some(id => {
+        const el = msgRefs.current[id];
+        return el && el.contains(e.target);
+      });
+      if (!insideAnySelected) clearSelection();
     }
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('mousedown', onMouseDown);
@@ -419,7 +419,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
       document.removeEventListener('keydown', onKeyDown);
       document.removeEventListener('mousedown', onMouseDown);
     };
-  }, [selectedMessageId]);
+  }, [selectedMessageIds]);
 
   // Desktop: close the chevron dropdown on outside click.
   useEffect(() => {
@@ -593,9 +593,8 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     return { isMe, canEdit, canDeleteAll, canSaveSticker, canReply, canCopy, canAct };
   }
 
-  // Shared action list for the mobile overlay menu, the desktop chevron dropdown,
-  // and the desktop selected-message header bar — each renders it with its own
-  // layout, but the actions and their permission gating live in one place.
+  // Quick single-message action list — used only by the desktop chevron dropdown,
+  // which is independent of the selection system (a one-off action, not a mode).
   function getMessageMenuActions(msg, perms, closeUI) {
     const actions = [];
     if (perms.canReply) {
@@ -617,31 +616,87 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     return actions;
   }
 
-  function openActionOverlay(msgId) {
-    const el = msgRefs.current[msgId];
-    if (el) setActionRect(el.getBoundingClientRect());
-    setActiveMessageId(msgId);
-    setSelectedMessageId(null);
+  // Shared action list for the selection header bar — the SAME underlying
+  // functions (deleteMessage, deleteForMe, copyMessage, etc.) as the chevron
+  // dropdown above, just gated by rules that apply across the WHOLE selection
+  // rather than a single message:
+  //  - Reply/Edit/Save to Mine only make sense for exactly one selected message.
+  //  - Copy applies to every selected text message at once.
+  //  - Delete for Everyone only shows if EVERY selected message is still eligible;
+  //    Delete for Me always applies to the whole selection regardless.
+  function getSelectionActions(selectedMsgs) {
+    if (!selectedMsgs.length) return [];
+    const permsList = selectedMsgs.map(getMsgPermissions);
+    const actions = [];
+
+    if (selectedMsgs.length === 1 && permsList[0].canReply) {
+      actions.push({ key: 'reply', label: 'Reply', icon: CornerUpLeft, onClick: () => { setReplyingTo(selectedMsgs[0]); clearSelection(); } });
+    }
+
+    const copyable = selectedMsgs.filter((_, i) => permsList[i].canCopy);
+    if (copyable.length) {
+      actions.push({ key: 'copy', label: 'Copy', icon: Copy, onClick: () => { copySelectedMessages(copyable); clearSelection(); } });
+    }
+
+    if (selectedMsgs.length === 1 && permsList[0].canSaveSticker) {
+      actions.push({ key: 'save', label: 'Save to Mine', icon: Star, accentColor: '#ca8a04', onClick: () => { setStickerPreview(selectedMsgs[0]); clearSelection(); } });
+    }
+
+    if (selectedMsgs.length === 1 && permsList[0].canEdit) {
+      actions.push({ key: 'edit', label: 'Edit', icon: Pencil, onClick: () => { setEditText(selectedMsgs[0].content); setEditingMessageId(selectedMsgs[0].id); clearSelection(); } });
+    }
+
+    if (permsList.every(p => p.canDeleteAll)) {
+      actions.push({
+        key: 'deleteAll', label: 'Delete for All', icon: Trash2, destructive: true,
+        onClick: () => { selectedMsgs.forEach(deleteMessage); clearSelection(); },
+      });
+    }
+
+    actions.push({
+      key: 'deleteMe', label: 'Delete for Me', icon: Trash2, destructive: true,
+      onClick: () => { selectedMsgs.forEach(deleteForMe); clearSelection(); },
+    });
+
+    return actions;
+  }
+
+  // Long-press (mobile) and double-click/right-click (desktop) all call this —
+  // one shared entry point into the same selection state regardless of device.
+  function toggleMessageSelection(msgId) {
+    setSelectedMessageIds(prev => {
+      const next = new Set(prev);
+      if (next.has(msgId)) next.delete(msgId);
+      else next.add(msgId);
+      return next;
+    });
+  }
+
+  function enterSelection(msgId) {
     setChevronMenuMsgId(null);
+    toggleMessageSelection(msgId);
     haptic([30, 15, 50]);
   }
 
-  function closeActionOverlay() {
-    setActiveMessageId(null);
-    setActionRect(null);
+  function clearSelection() {
+    setSelectedMessageIds(new Set());
     setShowReactionPicker(false);
+  }
+
+  async function copySelectedMessages(msgs) {
+    try { await navigator.clipboard.writeText(msgs.map(m => m.content || '').join('\n')); } catch {}
+    setCopiedFeedback(true);
+    setTimeout(() => setCopiedFeedback(false), 1800);
   }
 
   async function copyMessage(msg) {
     try { await navigator.clipboard.writeText(msg.content || ''); } catch {}
-    closeActionOverlay();
     setCopiedFeedback(true);
     setTimeout(() => setCopiedFeedback(false), 1800);
   }
 
   async function deleteForMe(msg) {
     setHiddenMsgIds(prev => new Set([...prev, msg.id]));
-    closeActionOverlay();
     try {
       const { error } = await supabase
         .from('chat_message_hidden')
@@ -720,8 +775,6 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
   }
 
   async function deleteMessage(msg) {
-    closeActionOverlay();
-    setSelectedMessageId(null);
     // Optimistic: don't wait on the realtime round-trip to reflect the deletion
     // for the person who just triggered it — the other party still gets it via
     // the postgres_changes subscription like any other update. Reactions go away
@@ -754,7 +807,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     }
     // Optimistic so it feels instant even before the realtime echo arrives
     setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, reactions: updated } : m));
-    closeActionOverlay();
+    clearSelection();
     try {
       const { error } = await supabase.rpc('set_chat_message_reactions', {
         p_message_id: msg.id,
@@ -773,7 +826,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     longPressActivated.current = false;
     longPressTimer.current = setTimeout(() => {
       longPressActivated.current = true;
-      openActionOverlay(msgId);
+      enterSelection(msgId);
     }, 480);
   }, []);
 
@@ -884,14 +937,10 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
       : selectedPartnership.user_a_name;
     const partnerProfile = partnerProfiles[partnerId];
 
-    const activeMsg = activeMessageId ? messages.find(m => m.id === activeMessageId) : null;
-    const activePerms = activeMsg ? getMsgPermissions(activeMsg) : null;
-    const activeMenuItems = activeMsg ? getMessageMenuActions(activeMsg, activePerms, closeActionOverlay) : [];
-    const overlayLayout = activeMsg && actionRect ? getOverlayLayout(actionRect, activeMenuItems.length) : null;
-    const overlaySide = activePerms?.isMe ? { right: 16 } : { left: 16 };
-
-    const selectedMsg = selectedMessageId ? messages.find(m => m.id === selectedMessageId) : null;
-    const selectedPerms = selectedMsg ? getMsgPermissions(selectedMsg) : null;
+    const selectedMsgs = messages.filter(m => selectedMessageIds.has(m.id));
+    const selectionAnchorMsg = selectedMsgs.length === 1 ? selectedMsgs[0] : null;
+    const selectionAnchorSide = selectionAnchorMsg && getMsgPermissions(selectionAnchorMsg).isMe ? { right: 16 } : { left: 16 };
+    const reactionBarTop = selectionAnchorMsg ? getReactionBarTop(selectionAnchorRect) : null;
 
     return (
       <div className="flex flex-col h-full bg-background" data-no-swipe-nav>
@@ -948,84 +997,56 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
           )}
         </AnimatePresence>
 
-        {/* Mobile: message action overlay — dim/blur backdrop + floating reaction bar + context menu */}
+        {/* Floating reaction bar — shown whenever exactly one message is selected,
+            regardless of whether selection started via long-press or double-click. */}
         <AnimatePresence>
-          {activeMsg && !editingMessageId && overlayLayout && (
-            <React.Fragment key="action-overlay">
-              <motion.div
-                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                transition={{ duration: 0.15 }}
-                className="fixed inset-0 z-40"
-                style={{ background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(2px)', WebkitBackdropFilter: 'blur(2px)' }}
-                onClick={closeActionOverlay}
-              />
-              {/* A message deleted for everyone has nothing left to react to — only
-                  "Delete for Me" remains in the menu below, so skip the reaction bar. */}
-              {!activeMsg.is_deleted && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.85, y: overlayLayout.placement === 'below' ? 6 : -6 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.85, y: overlayLayout.placement === 'below' ? 6 : -6 }}
-                  transition={{ type: 'spring', damping: 22, stiffness: 420 }}
-                  className="fixed z-50 flex items-center gap-0.5 px-2 py-1.5 rounded-full shadow-2xl"
-                  style={{ top: overlayLayout.reactionTop, ...overlaySide, background: 'hsl(var(--popover))' }}
+          {selectionAnchorMsg && !editingMessageId && !selectionAnchorMsg.is_deleted && reactionBarTop != null && (
+            <motion.div
+              key="reaction-bar"
+              initial={{ opacity: 0, scale: 0.85, y: 6 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.85, y: 6 }}
+              transition={{ type: 'spring', damping: 22, stiffness: 420 }}
+              className="fixed z-50 flex items-center gap-0.5 px-2 py-1.5 rounded-full shadow-2xl"
+              style={{ top: reactionBarTop, ...selectionAnchorSide, background: 'hsl(var(--popover))' }}
+            >
+              {REACTION_EMOJIS.map(emoji => (
+                <button
+                  key={emoji}
+                  onClick={() => toggleMessageReaction(selectionAnchorMsg, emoji)}
+                  className="w-8 h-8 flex items-center justify-center text-lg rounded-full hover:bg-secondary transition-transform active:scale-90"
                 >
-                  {REACTION_EMOJIS.map(emoji => (
-                    <button
-                      key={emoji}
-                      onClick={() => toggleMessageReaction(activeMsg, emoji)}
-                      className="w-8 h-8 flex items-center justify-center text-lg rounded-full hover:bg-secondary transition-transform active:scale-90"
-                    >
-                      {emoji}
-                    </button>
-                  ))}
-                  <button
-                    onClick={() => setShowReactionPicker(true)}
-                    className="w-8 h-8 flex items-center justify-center rounded-full bg-secondary text-muted-foreground hover:opacity-80 transition-opacity flex-shrink-0"
-                  >
-                    <Plus size={15} />
-                  </button>
-                </motion.div>
-              )}
-              <motion.div
-                initial={{ opacity: 0, scale: 0.92 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.92 }}
-                transition={{ type: 'spring', damping: 26, stiffness: 440 }}
-                className="fixed z-50 flex flex-col min-w-[200px] rounded-2xl border border-border shadow-2xl overflow-hidden"
-                style={{ top: overlayLayout.menuTop, ...overlaySide, background: 'hsl(var(--popover))' }}
+                  {emoji}
+                </button>
+              ))}
+              <button
+                onClick={() => setShowReactionPicker(true)}
+                className="w-8 h-8 flex items-center justify-center rounded-full bg-secondary text-muted-foreground hover:opacity-80 transition-opacity flex-shrink-0"
               >
-                {activeMenuItems.map((a, i) => (
-                  <button
-                    key={a.key}
-                    onClick={a.onClick}
-                    className={`flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-secondary transition-colors text-left ${i > 0 ? 'border-t border-border' : ''}`}
-                    style={a.destructive ? { color: 'hsl(var(--destructive))' } : a.accentColor ? { color: a.accentColor } : undefined}
-                  >
-                    {a.label} <a.icon size={15} />
-                  </button>
-                ))}
-              </motion.div>
-              {showReactionPicker && (
-                <Suspense fallback={null}>
-                  <ReactionEmojiPicker onSelect={emoji => toggleMessageReaction(activeMsg, emoji)} />
-                </Suspense>
-              )}
-            </React.Fragment>
+                <Plus size={15} />
+              </button>
+            </motion.div>
           )}
         </AnimatePresence>
+        {showReactionPicker && selectionAnchorMsg && (
+          <Suspense fallback={null}>
+            <ReactionEmojiPicker onSelect={emoji => toggleMessageReaction(selectionAnchorMsg, emoji)} />
+          </Suspense>
+        )}
 
-        {/* Header — swaps to a contextual action bar when a message is selected (desktop double-click) */}
-        {selectedMsg ? (
+        {/* Header — swaps to a contextual action bar whenever one or more messages are
+            selected (long-press on mobile, double-click/right-click on desktop, or any
+            subsequent tap on another message while selection mode is active). */}
+        {selectedMsgs.length > 0 ? (
           <div ref={headerActionBarRef} className="flex items-center gap-2 px-3 py-3 border-b border-border flex-shrink-0">
             <button
-              onClick={() => setSelectedMessageId(null)}
+              onClick={clearSelection}
               className="p-2 rounded-full bg-secondary hover:opacity-75 transition-opacity"
             >
               <XIcon size={17} />
             </button>
-            <span className="flex-1 text-sm font-semibold text-foreground ml-1">1 selected</span>
-            {getMessageMenuActions(selectedMsg, selectedPerms, () => setSelectedMessageId(null)).map(a => (
+            <span className="flex-1 text-sm font-semibold text-foreground ml-1">{selectedMsgs.length} selected</span>
+            {getSelectionActions(selectedMsgs).map(a => (
               <button
                 key={a.key}
                 onClick={a.onClick}
@@ -1089,14 +1110,22 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
             const perms = getMsgPermissions(msg);
             const { isMe, canAct, canReply } = perms;
             const isEditing = editingMessageId === msg.id;
-            const isActive = activeMessageId === msg.id;
-            const isSelected = selectedMessageId === msg.id;
+            const isSelected = selectedMessageIds.has(msg.id);
+            const selectionActive = selectedMessageIds.size > 0;
             const isRead = isMe && !!partnerLastReadAt && new Date(msg.created_at) <= new Date(partnerLastReadAt);
             const replyTo = msg.reply_to_id ? messages.find(m => m.id === msg.reply_to_id) : null;
             const reactionGroups = {};
             (msg.reactions || []).forEach(r => { reactionGroups[r.emoji] = (reactionGroups[r.emoji] || 0) + 1; });
             const reactionEntries = Object.entries(reactionGroups);
             const showChevronMenu = chevronMenuMsgId === msg.id;
+
+            // Tapping anywhere on the row toggles selection once selection mode is
+            // active; the bubble/reply-quote handlers below bow out (no side effect,
+            // just let the click bubble here) when that's the case, so there's exactly
+            // one place deciding "this tap means toggle" rather than several racing.
+            function handleRowClick() {
+              if (selectionActive && canAct) toggleMessageSelection(msg.id);
+            }
 
             return (
               <React.Fragment key={msg.id}>
@@ -1111,114 +1140,178 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                   </div>
                 )}
                 <motion.div
-                ref={el => { msgRefs.current[msg.id] = el; }}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="relative"
-              >
-                {/* Swipe-to-reply reveal icon — lives outside the draggable layer so it stays put */}
-                <div
-                  ref={el => { replyIconRefs.current[msg.id] = el; }}
-                  className="absolute left-2 top-1/2 pointer-events-none"
-                  style={{ opacity: 0, transform: 'translateY(-50%) scale(0.5)' }}
+                  ref={el => { msgRefs.current[msg.id] = el; }}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="relative"
                 >
-                  <CornerUpLeft size={18} style={{ color: 'hsl(var(--theme-accent))' }} />
-                </div>
-
-                <motion.div
-                  className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} relative`}
-                  style={{
-                    // Without this, the browser's own scroll-gesture recognizer and Framer's
-                    // JS-based drag detection race to interpret the same touch — whichever
-                    // wins varies by exact finger movement, which is what made the swipe feel
-                    // random. pan-y tells the browser up front "never treat horizontal motion
-                    // here as a scroll", leaving Framer's drag="x" solely responsible for it.
-                    touchAction: 'pan-y',
-                    ...(isActive ? { zIndex: 55 } : {}),
-                    ...(isSelected ? { background: 'hsl(var(--theme-accent) / 0.06)', borderRadius: 12, margin: '0 -8px', padding: '2px 8px' } : {}),
-                  }}
-                  drag={canReply && !isEditing ? 'x' : false}
-                  dragConstraints={{ left: 0, right: SWIPE_REPLY_MAX }}
-                  dragElastic={{ left: 0, right: 0.3 }}
-                  dragSnapToOrigin
-                  onDragStart={() => clearTimeout(longPressTimer.current)}
-                  onDrag={(e, info) => {
-                    const icon = replyIconRefs.current[msg.id];
-                    if (!icon) return;
-                    const progress = Math.min(Math.max(info.offset.x / SWIPE_REPLY_THRESHOLD, 0), 1);
-                    icon.style.opacity = String(progress);
-                    icon.style.transform = `translateY(-50%) scale(${0.5 + 0.5 * progress})`;
-                  }}
-                  onDragEnd={(e, info) => {
-                    const icon = replyIconRefs.current[msg.id];
-                    if (icon) { icon.style.opacity = '0'; icon.style.transform = 'translateY(-50%) scale(0.5)'; }
-                    if (info.offset.x > SWIPE_REPLY_THRESHOLD) {
-                      haptic([20]);
-                      setReplyingTo(msg);
-                    }
-                  }}
-                  onPointerDown={() => handleMsgPointerDown(msg.id, canAct)}
-                  onPointerUp={handleMsgPointerUp}
-                  onPointerCancel={handleMsgPointerUp}
-                  onContextMenu={e => { e.preventDefault(); if (canAct) openActionOverlay(msg.id); }}
-                  onDoubleClick={() => { if (canAct) { setSelectedMessageId(msg.id); setActiveMessageId(null); setChevronMenuMsgId(null); } }}
-                >
-                  {/* Reply-to reference — hidden once either side of the reference is gone:
-                      the original being quoted, or this reply message itself. */}
-                  {replyTo && !replyTo.is_deleted && !msg.is_deleted && !hiddenMsgIds.has(replyTo.id) && (
-                    <button
-                      onClick={() => scrollToMessage(replyTo.id)}
-                      className="max-w-[72%] text-left px-2.5 py-1.5 rounded-xl mb-1 border-l-2 transition-opacity hover:opacity-80 flex items-center gap-2"
-                      style={{ background: 'hsl(var(--theme-accent) / 0.07)', borderLeftColor: 'hsl(var(--theme-accent))' }}
-                    >
-                      {isMediaMsg(replyTo) && (
-                        <PostImage src={replyTo.content} alt="" className="w-8 h-8 rounded-md object-cover flex-shrink-0" />
-                      )}
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-semibold" style={{ color: 'hsl(var(--theme-accent))' }}>
-                          {replyTo.sender_id === currentUser.id ? 'You' : partnerName}
-                        </p>
-                        <p className="text-[11px] text-muted-foreground truncate">
-                          {replyTo.message_type === 'sticker' ? 'Sticker'
-                            : replyTo.message_type === 'gif' ? 'GIF'
-                            : replyTo.content}
-                        </p>
+                  {/* Swipe-to-reply reveal icon — lives outside the draggable layer so it
+                      stays put. Doubles as the multi-select checkbox once selection mode
+                      is active (the two never show at the same time: dragging is disabled
+                      whenever a selection is active). */}
+                  <div
+                    className="absolute left-2 top-1/2 -translate-y-1/2 z-10"
+                    style={{ pointerEvents: selectionActive ? 'auto' : 'none' }}
+                  >
+                    {selectionActive ? (
+                      <button
+                        onClick={() => canAct && toggleMessageSelection(msg.id)}
+                        className="w-5 h-5 rounded-full border-2 flex items-center justify-center"
+                        style={isSelected
+                          ? { background: 'hsl(var(--theme-accent))', borderColor: 'hsl(var(--theme-accent))' }
+                          : { borderColor: 'hsl(var(--border))', background: 'hsl(var(--background))' }}
+                      >
+                        {isSelected && <Check size={12} color="white" strokeWidth={3} />}
+                      </button>
+                    ) : (
+                      <div
+                        ref={el => { replyIconRefs.current[msg.id] = el; }}
+                        style={{ opacity: 0, transform: 'scale(0.5)' }}
+                      >
+                        <CornerUpLeft size={18} style={{ color: 'hsl(var(--theme-accent))' }} />
                       </div>
-                    </button>
-                  )}
+                    )}
+                  </div>
 
-                  {/* Sticker / GIF */}
-                  {isMediaMsg(msg) && !msg.is_deleted ? (
-                    <>
-                      {/* Chevron + dropdown live in a plain (non-clipping) wrapper — the image's
-                          own overflow-hidden (for rounded corners) would otherwise clip the
-                          dropdown, since it's positioned just below the image's bottom edge. */}
-                      <div className="relative max-w-[220px]">
-                        <motion.div
-                          className={`relative rounded-2xl overflow-hidden ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
-                          style={{ cursor: 'pointer', userSelect: 'none', boxShadow: isActive ? '0 8px 24px rgba(0,0,0,0.35)' : 'none' }}
-                          animate={{ scale: isActive ? 1.04 : 1 }}
-                          transition={{ type: 'spring', damping: 20, stiffness: 400 }}
-                          onClick={() => {
-                            if (longPressActivated.current) { longPressActivated.current = false; return; }
-                            if (isActive) { closeActionOverlay(); return; }
-                            setStickerPreview(msg);
-                          }}
-                        >
-                          <ChatMediaBubble
-                            src={msg.content}
-                            alt={msg.message_type}
-                            maxHeight={msg.message_type === 'sticker' ? 120 : 160}
-                            isExternal={!msg.content.includes(STORAGE_URL_MARKER)}
-                          />
-                        </motion.div>
-                        {canAct && (
+                  <motion.div
+                    className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} relative`}
+                    style={{
+                      // Without this, the browser's own scroll-gesture recognizer and Framer's
+                      // JS-based drag detection race to interpret the same touch — whichever
+                      // wins varies by exact finger movement, which is what made the swipe feel
+                      // random. pan-y tells the browser up front "never treat horizontal motion
+                      // here as a scroll", leaving Framer's drag="x" solely responsible for it.
+                      touchAction: 'pan-y',
+                      ...(isSelected ? { background: 'hsl(var(--theme-accent) / 0.06)', borderRadius: 12, margin: '0 -8px', padding: '2px 8px' } : {}),
+                    }}
+                    drag={canReply && !isEditing && !selectionActive ? 'x' : false}
+                    dragConstraints={{ left: 0, right: SWIPE_REPLY_MAX }}
+                    dragElastic={{ left: 0, right: 0.3 }}
+                    dragSnapToOrigin
+                    onDragStart={() => clearTimeout(longPressTimer.current)}
+                    onDrag={(e, info) => {
+                      const icon = replyIconRefs.current[msg.id];
+                      if (!icon) return;
+                      const progress = Math.min(Math.max(info.offset.x / SWIPE_REPLY_THRESHOLD, 0), 1);
+                      icon.style.opacity = String(progress);
+                      icon.style.transform = `scale(${0.5 + 0.5 * progress})`;
+                    }}
+                    onDragEnd={(e, info) => {
+                      const icon = replyIconRefs.current[msg.id];
+                      if (icon) { icon.style.opacity = '0'; icon.style.transform = 'scale(0.5)'; }
+                      if (info.offset.x > SWIPE_REPLY_THRESHOLD) {
+                        haptic([20]);
+                        setReplyingTo(msg);
+                      }
+                    }}
+                    onPointerDown={() => handleMsgPointerDown(msg.id, canAct)}
+                    onPointerUp={handleMsgPointerUp}
+                    onPointerCancel={handleMsgPointerUp}
+                    onContextMenu={e => { e.preventDefault(); if (canAct) enterSelection(msg.id); }}
+                    onDoubleClick={() => { if (canAct) enterSelection(msg.id); }}
+                    onClick={handleRowClick}
+                  >
+                    {/* Reply-to reference — hidden once either side of the reference is gone:
+                        the original being quoted, or this reply message itself. */}
+                    {replyTo && !replyTo.is_deleted && !msg.is_deleted && !hiddenMsgIds.has(replyTo.id) && (
+                      <button
+                        onClick={() => { if (selectionActive) return; scrollToMessage(replyTo.id); }}
+                        className="max-w-[72%] text-left px-2.5 py-1.5 rounded-xl mb-1 border-l-2 transition-opacity hover:opacity-80 flex items-center gap-2"
+                        style={{ background: 'hsl(var(--theme-accent) / 0.07)', borderLeftColor: 'hsl(var(--theme-accent))' }}
+                      >
+                        {isMediaMsg(replyTo) && (
+                          <PostImage src={replyTo.content} alt="" className="w-8 h-8 rounded-md object-cover flex-shrink-0" />
+                        )}
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-semibold" style={{ color: 'hsl(var(--theme-accent))' }}>
+                            {replyTo.sender_id === currentUser.id ? 'You' : partnerName}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground truncate">
+                            {replyTo.message_type === 'sticker' ? 'Sticker'
+                              : replyTo.message_type === 'gif' ? 'GIF'
+                              : replyTo.content}
+                          </p>
+                        </div>
+                      </button>
+                    )}
+
+                    {/* Sticker / GIF */}
+                    {isMediaMsg(msg) && !msg.is_deleted ? (
+                      <>
+                        {/* Chevron + dropdown live in a plain (non-clipping) wrapper — the image's
+                            own overflow-hidden (for rounded corners) would otherwise clip the
+                            dropdown, since it's positioned just below the image's bottom edge. */}
+                        <div className="relative max-w-[220px]">
+                          <div
+                            className={`relative rounded-2xl overflow-hidden ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
+                            style={{ cursor: 'pointer', userSelect: 'none' }}
+                            onClick={() => {
+                              if (longPressActivated.current) { longPressActivated.current = false; return; }
+                              if (selectionActive) return;
+                              setStickerPreview(msg);
+                            }}
+                          >
+                            <ChatMediaBubble
+                              src={msg.content}
+                              alt={msg.message_type}
+                              maxHeight={msg.message_type === 'sticker' ? 120 : 160}
+                              isExternal={!msg.content.includes(STORAGE_URL_MARKER)}
+                            />
+                          </div>
+                          {canAct && !selectionActive && (
+                            <button
+                              onClick={e => { e.stopPropagation(); setChevronMenuMsgId(prev => prev === msg.id ? null : msg.id); }}
+                              className="desktop-only absolute top-1.5 right-1.5 items-center justify-center w-5 h-5 rounded-full opacity-40 hover:opacity-100 transition-opacity"
+                              style={{ background: 'rgba(0,0,0,0.4)' }}
+                            >
+                              <ChevronDown size={13} color="white" />
+                            </button>
+                          )}
+                          {showChevronMenu && (
+                            <div
+                              ref={chevronMenuRef}
+                              className="absolute top-full right-0 mt-1 z-30 flex flex-col min-w-[180px] rounded-xl border border-border shadow-lg overflow-hidden"
+                              style={{ background: 'hsl(var(--popover))' }}
+                              onClick={e => e.stopPropagation()}
+                            >
+                              {getMessageMenuActions(msg, perms, () => setChevronMenuMsgId(null)).map(a => (
+                                <button
+                                  key={a.key}
+                                  onClick={a.onClick}
+                                  className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary transition-colors text-left"
+                                  style={a.destructive ? { color: 'hsl(var(--destructive))' } : a.accentColor ? { color: a.accentColor } : undefined}
+                                >
+                                  <a.icon size={13} /> {a.label}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        {isMe && (
+                          <div className="flex items-center justify-end gap-0.5 mt-0.5 px-0.5">
+                            <Check size={9} strokeWidth={3} style={{ color: 'hsl(var(--muted-foreground))', opacity: isRead ? 0.85 : 0.4 }} />
+                            {isRead && <Check size={9} strokeWidth={3} style={{ color: 'hsl(var(--muted-foreground))', opacity: 0.85, marginLeft: -4 }} />}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      /* Text / system bubble */
+                      <div
+                        className={`relative max-w-[78%] px-3.5 py-2.5 rounded-2xl ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
+                        style={{
+                          background: isMe ? 'hsl(var(--theme-accent))' : 'hsl(var(--secondary))',
+                          color: isMe ? 'hsl(var(--theme-accent-fg))' : 'hsl(var(--foreground))',
+                          cursor: canAct ? 'pointer' : 'default',
+                          userSelect: 'none',
+                        }}
+                      >
+                        {canAct && !selectionActive && msg.message_type !== 'system' && (
                           <button
                             onClick={e => { e.stopPropagation(); setChevronMenuMsgId(prev => prev === msg.id ? null : msg.id); }}
                             className="desktop-only absolute top-1.5 right-1.5 items-center justify-center w-5 h-5 rounded-full opacity-40 hover:opacity-100 transition-opacity"
-                            style={{ background: 'rgba(0,0,0,0.4)' }}
+                            style={{ color: isMe ? 'hsl(var(--theme-accent-fg))' : 'hsl(var(--foreground))', background: 'rgba(128,128,128,0.2)' }}
                           >
-                            <ChevronDown size={13} color="white" />
+                            <ChevronDown size={13} />
                           </button>
                         )}
                         {showChevronMenu && (
@@ -1240,114 +1333,63 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                             ))}
                           </div>
                         )}
-                      </div>
-                      {isMe && (
-                        <div className="flex items-center justify-end gap-0.5 mt-0.5 px-0.5">
-                          <Check size={9} strokeWidth={3} style={{ color: 'hsl(var(--muted-foreground))', opacity: isRead ? 0.85 : 0.4 }} />
-                          {isRead && <Check size={9} strokeWidth={3} style={{ color: 'hsl(var(--muted-foreground))', opacity: 0.85, marginLeft: -4 }} />}
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    /* Text / system bubble */
-                    <motion.div
-                      className={`relative max-w-[78%] px-3.5 py-2.5 rounded-2xl ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
-                      style={{
-                        background: isMe ? 'hsl(var(--theme-accent))' : 'hsl(var(--secondary))',
-                        color: isMe ? 'hsl(var(--theme-accent-fg))' : 'hsl(var(--foreground))',
-                        cursor: canAct ? 'pointer' : 'default',
-                        userSelect: 'none',
-                        boxShadow: isActive ? '0 8px 24px rgba(0,0,0,0.35)' : 'none',
-                      }}
-                      animate={{ scale: isActive ? 1.04 : 1 }}
-                      transition={{ type: 'spring', damping: 20, stiffness: 400 }}
-                      onClick={() => { if (isActive) closeActionOverlay(); }}
-                    >
-                      {canAct && msg.message_type !== 'system' && (
-                        <button
-                          onClick={e => { e.stopPropagation(); setChevronMenuMsgId(prev => prev === msg.id ? null : msg.id); }}
-                          className="desktop-only absolute top-1.5 right-1.5 items-center justify-center w-5 h-5 rounded-full opacity-40 hover:opacity-100 transition-opacity"
-                          style={{ color: isMe ? 'hsl(var(--theme-accent-fg))' : 'hsl(var(--foreground))', background: 'rgba(128,128,128,0.2)' }}
-                        >
-                          <ChevronDown size={13} />
-                        </button>
-                      )}
-                      {showChevronMenu && (
-                        <div
-                          ref={chevronMenuRef}
-                          className="absolute top-full right-0 mt-1 z-30 flex flex-col min-w-[180px] rounded-xl border border-border shadow-lg overflow-hidden"
-                          style={{ background: 'hsl(var(--popover))' }}
-                          onClick={e => e.stopPropagation()}
-                        >
-                          {getMessageMenuActions(msg, perms, () => setChevronMenuMsgId(null)).map(a => (
-                            <button
-                              key={a.key}
-                              onClick={a.onClick}
-                              className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary transition-colors text-left"
-                              style={a.destructive ? { color: 'hsl(var(--destructive))' } : a.accentColor ? { color: a.accentColor } : undefined}
-                            >
-                              <a.icon size={13} /> {a.label}
+                        {msg.is_deleted ? (
+                          <p className="text-xs italic opacity-50">This message was deleted</p>
+                        ) : msg.message_type === 'system' ? (
+                          <p className="text-xs italic opacity-70">{msg.content}</p>
+                        ) : isEditing ? (
+                          <div className="flex items-center gap-2 min-w-[160px]">
+                            <input
+                              autoFocus
+                              className="bg-transparent border-none outline-none text-sm flex-1 min-w-0"
+                              style={{ color: 'inherit' }}
+                              value={editText}
+                              onChange={e => setEditText(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') saveEdit(msg);
+                                if (e.key === 'Escape') setEditingMessageId(null);
+                              }}
+                            />
+                            <button onClick={e => { e.stopPropagation(); saveEdit(msg); }} className="opacity-80 flex-shrink-0">
+                              <Check size={14} />
                             </button>
-                          ))}
-                        </div>
-                      )}
-                      {msg.is_deleted ? (
-                        <p className="text-xs italic opacity-50">This message was deleted</p>
-                      ) : msg.message_type === 'system' ? (
-                        <p className="text-xs italic opacity-70">{msg.content}</p>
-                      ) : isEditing ? (
-                        <div className="flex items-center gap-2 min-w-[160px]">
-                          <input
-                            autoFocus
-                            className="bg-transparent border-none outline-none text-sm flex-1 min-w-0"
-                            style={{ color: 'inherit' }}
-                            value={editText}
-                            onChange={e => setEditText(e.target.value)}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter') saveEdit(msg);
-                              if (e.key === 'Escape') setEditingMessageId(null);
-                            }}
-                          />
-                          <button onClick={e => { e.stopPropagation(); saveEdit(msg); }} className="opacity-80 flex-shrink-0">
-                            <Check size={14} />
-                          </button>
-                          <button onClick={e => { e.stopPropagation(); setEditingMessageId(null); }} className="opacity-80 flex-shrink-0">
-                            <XIcon size={14} />
-                          </button>
-                        </div>
-                      ) : (
-                        <>
-                          <p className="text-sm leading-relaxed">{msg.content}</p>
-                          <div className="flex items-center justify-end gap-0.5 mt-0.5">
-                            <span className="text-[10px] opacity-60">
-                              {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                            {isMe && (
-                              <>
-                                <Check size={9} strokeWidth={3} style={{ opacity: isRead ? 0.85 : 0.4 }} />
-                                {isRead && <Check size={9} strokeWidth={3} style={{ opacity: 0.85, marginLeft: -4 }} />}
-                              </>
-                            )}
+                            <button onClick={e => { e.stopPropagation(); setEditingMessageId(null); }} className="opacity-80 flex-shrink-0">
+                              <XIcon size={14} />
+                            </button>
                           </div>
-                        </>
-                      )}
-                    </motion.div>
-                  )}
+                        ) : (
+                          <>
+                            <p className="text-sm leading-relaxed">{msg.content}</p>
+                            <div className="flex items-center justify-end gap-0.5 mt-0.5">
+                              <span className="text-[10px] opacity-60">
+                                {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                              {isMe && (
+                                <>
+                                  <Check size={9} strokeWidth={3} style={{ opacity: isRead ? 0.85 : 0.4 }} />
+                                  {isRead && <Check size={9} strokeWidth={3} style={{ opacity: 0.85, marginLeft: -4 }} />}
+                                </>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
 
-                  {/* Reaction summary */}
-                  {reactionEntries.length > 0 && !msg.is_deleted && (
-                    <div
-                      className="flex items-center gap-1 px-2 py-0.5 rounded-full mt-1 text-xs shadow"
-                      style={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))' }}
-                    >
-                      {reactionEntries.map(([emoji, count]) => (
-                        <span key={emoji} className="flex items-center gap-0.5">
-                          {emoji}{count > 1 && <span className="text-[10px] text-muted-foreground">{count}</span>}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </motion.div>
+                    {/* Reaction summary */}
+                    {reactionEntries.length > 0 && !msg.is_deleted && (
+                      <div
+                        className="flex items-center gap-1 px-2 py-0.5 rounded-full mt-1 text-xs shadow"
+                        style={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))' }}
+                      >
+                        {reactionEntries.map(([emoji, count]) => (
+                          <span key={emoji} className="flex items-center gap-0.5">
+                            {emoji}{count > 1 && <span className="text-[10px] text-muted-foreground">{count}</span>}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </motion.div>
                 </motion.div>
               </React.Fragment>
             );
