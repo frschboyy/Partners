@@ -2,12 +2,21 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '@/api/supabaseClient';
 import { Trophy, Flame, Camera, Dumbbell, Crown, AlertCircle, Users, Banknote } from 'lucide-react';
 import Avatar from '@/components/Avatar';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
+
+const tabSlideVariants = {
+  enter: (dir) => ({ x: dir >= 0 ? '100%' : '-100%' }),
+  center: { x: 0 },
+  exit: (dir) => ({ x: dir >= 0 ? '-100%' : '100%' }),
+};
+
+const tabSlideTransition = { type: 'tween', ease: [0.32, 0.72, 0, 1], duration: 0.3 };
 
 export default function Leaderboard({ currentUser, profile, onTabChange }) {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('streak');
+  const [slideDir, setSlideDir] = useState(0);
   const tabBarRef = useRef(null);
   const swipeStartX = useRef(null);
   const swipeStartY = useRef(null);
@@ -226,6 +235,13 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
     return 'hsl(var(--theme-accent))';
   }
 
+  function changeTab(id) {
+    const prevIdx = tabs.findIndex(t => t.id === activeTab);
+    const nextIdx = tabs.findIndex(t => t.id === id);
+    setSlideDir(nextIdx >= prevIdx ? 1 : -1);
+    setActiveTab(id);
+  }
+
   function handleTouchStart(e) {
     if (tabBarRef.current?.contains(e.target)) return;
     swipeStartX.current = e.touches[0].clientX;
@@ -239,8 +255,8 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
     swipeStartX.current = null;
     if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
     const idx = tabs.findIndex(t => t.id === activeTab);
-    if (dx < 0 && idx < tabs.length - 1) setActiveTab(tabs[idx + 1].id);
-    else if (dx > 0 && idx > 0) setActiveTab(tabs[idx - 1].id);
+    if (dx < 0 && idx < tabs.length - 1) changeTab(tabs[idx + 1].id);
+    else if (dx > 0 && idx > 0) changeTab(tabs[idx - 1].id);
   }
 
   return (
@@ -263,7 +279,7 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
         {tabs.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
-            onClick={() => setActiveTab(id)}
+            onClick={() => changeTab(id)}
             className={`flex items-center justify-center gap-1.5 flex-shrink-0 px-3 py-2 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
               activeTab === id ? 'text-primary-foreground' : 'bg-secondary text-muted-foreground'
             }`}
@@ -275,6 +291,18 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
         ))}
       </div>
 
+      <div className="flex-1 overflow-hidden relative">
+        <AnimatePresence initial={false} custom={slideDir}>
+          <motion.div
+            key={activeTab}
+            custom={slideDir}
+            variants={tabSlideVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={tabSlideTransition}
+            className="absolute inset-0 flex flex-col"
+          >
       {/* Section subtitle */}
       {isSlipTab && (
         <p className="text-center text-xs text-muted-foreground mb-3 px-4">
@@ -424,6 +452,9 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
             </motion.div>
           );
         })()}
+      </div>
+          </motion.div>
+        </AnimatePresence>
       </div>
     </div>
   );

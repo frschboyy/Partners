@@ -46,6 +46,14 @@ function useBlockBrowserBack() {
   }, []);
 }
 
+const tabSlideVariants = {
+  enter: (dir) => ({ x: dir >= 0 ? '100%' : '-100%' }),
+  center: { x: 0 },
+  exit: (dir) => ({ x: dir >= 0 ? '-100%' : '100%' }),
+};
+
+const tabSlideTransition = { type: 'tween', ease: [0.32, 0.72, 0, 1], duration: 0.3 };
+
 function OfflineBanner() {
   const online = useOnlineStatus();
   return (
@@ -275,48 +283,61 @@ function MainApp({ user }) {
         onTouchStart={handleSwipeTouchStart}
         onTouchEnd={handleSwipeTouchEnd}
       >
-        {activeTab === 'home' && (
-          <div className="h-full overflow-y-auto">
-            <Home
-              currentUser={user}
-              profile={profile}
-              onProfileUpdate={setProfile}
-              navIntent={navIntent}
-              onClearNavIntent={() => setNavIntent(null)}
-            />
-          </div>
-        )}
-        {activeTab === 'feed' && (
-          <div className="h-full">
-            <Feed currentUser={user} profile={profile} />
-          </div>
-        )}
-        {activeTab === 'chat' && (
-          <div className="h-full overflow-y-auto">
-            <Chat currentUser={user} profile={profile} onTabChange={handleTabChange} navIntent={navIntent} onClearNavIntent={() => setNavIntent(null)} />
-          </div>
-        )}
-        {activeTab === 'leaderboard' && (
-          <div className="h-full overflow-y-auto">
-            <Leaderboard currentUser={user} profile={profile} onTabChange={handleTabChange} />
-          </div>
-        )}
-        {activeTab === 'settings' && (
-          <div className="h-full overflow-y-auto">
-            <Settings
-              currentUser={user}
-              profile={profile}
-              onProfileUpdate={setProfile}
-              currentTheme={currentTheme}
-              darkMode={darkMode}
-              onThemeChange={setCurrentTheme}
-              onDarkModeChange={setDarkMode}
-              scrollToSection={settingsSection}
-              onSectionHandled={() => setSettingsSection(null)}
-            />
-          </div>
-        )}
-        {activeTab === 'notifications' && <div className="h-full" />}
+        <AnimatePresence initial={false} custom={slideDir}>
+          <motion.div
+            key={activeTab}
+            custom={slideDir}
+            variants={tabSlideVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={tabSlideTransition}
+            className="absolute inset-0"
+          >
+            {activeTab === 'home' && (
+              <div className="h-full overflow-y-auto">
+                <Home
+                  currentUser={user}
+                  profile={profile}
+                  onProfileUpdate={setProfile}
+                  navIntent={navIntent}
+                  onClearNavIntent={() => setNavIntent(null)}
+                />
+              </div>
+            )}
+            {activeTab === 'feed' && (
+              <div className="h-full">
+                <Feed currentUser={user} profile={profile} />
+              </div>
+            )}
+            {activeTab === 'chat' && (
+              <div className="h-full overflow-y-auto">
+                <Chat currentUser={user} profile={profile} onTabChange={handleTabChange} navIntent={navIntent} onClearNavIntent={() => setNavIntent(null)} />
+              </div>
+            )}
+            {activeTab === 'leaderboard' && (
+              <div className="h-full overflow-y-auto">
+                <Leaderboard currentUser={user} profile={profile} onTabChange={handleTabChange} />
+              </div>
+            )}
+            {activeTab === 'settings' && (
+              <div className="h-full overflow-y-auto">
+                <Settings
+                  currentUser={user}
+                  profile={profile}
+                  onProfileUpdate={setProfile}
+                  currentTheme={currentTheme}
+                  darkMode={darkMode}
+                  onThemeChange={setCurrentTheme}
+                  onDarkModeChange={setDarkMode}
+                  scrollToSection={settingsSection}
+                  onSectionHandled={() => setSettingsSection(null)}
+                />
+              </div>
+            )}
+            {activeTab === 'notifications' && <div className="h-full" />}
+          </motion.div>
+        </AnimatePresence>
       </div>
 
       <BottomNav
