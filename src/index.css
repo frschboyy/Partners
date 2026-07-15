@@ -254,6 +254,18 @@
     background-color: hsl(var(--theme-accent));
   }
 
+  /* 100vh on mobile Safari/Chrome is the LARGE viewport (as if the collapsible
+     address bar were always hidden) — a container sized to it is taller than
+     what's actually visible whenever that chrome is showing, pushing content
+     near the bottom (or the whole box, near the top) out of view until the
+     browser chrome collapses on scroll/zoom. 100dvh tracks the real, current
+     viewport continuously; the 100vh line stays as a fallback for browsers
+     that don't support dvh (the unknown value is simply ignored by them). */
+  .h-app-screen {
+    height: 100vh;
+    height: 100dvh;
+  }
+
   .bg-accent-muted {
     background-color: hsl(var(--theme-accent-muted));
   }

@@ -1088,11 +1088,16 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                 <motion.div
                   className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} relative`}
                   style={{
+                    // Without this, the browser's own scroll-gesture recognizer and Framer's
+                    // JS-based drag detection race to interpret the same touch — whichever
+                    // wins varies by exact finger movement, which is what made the swipe feel
+                    // random. pan-y tells the browser up front "never treat horizontal motion
+                    // here as a scroll", leaving Framer's drag="x" solely responsible for it.
+                    touchAction: 'pan-y',
                     ...(isActive ? { zIndex: 55 } : {}),
                     ...(isSelected ? { background: 'hsl(var(--theme-accent) / 0.06)', borderRadius: 12, margin: '0 -8px', padding: '2px 8px' } : {}),
                   }}
                   drag={canReply && !isEditing ? 'x' : false}
-                  dragDirectionLock
                   dragConstraints={{ left: 0, right: SWIPE_REPLY_MAX }}
                   dragElastic={{ left: 0, right: 0.3 }}
                   dragSnapToOrigin
@@ -1366,7 +1371,11 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
               </Suspense>
             )}
           </AnimatePresence>
-          <div className="flex items-center gap-2 px-4 py-3 pb-20">
+          {/* BottomNav is h-16 (4rem) plus its own safe-area-inset-bottom padding — match
+              that exactly rather than guessing a flat value, which undershoots on
+              devices with a large inset (notch/home-indicator) and lets BottomNav
+              overlap the send button. */}
+          <div className="flex items-center gap-2 px-4 py-3" style={{ paddingBottom: 'calc(4rem + env(safe-area-inset-bottom, 8px))' }}>
             <motion.button
               whileTap={{ scale: 0.85 }}
               onClick={() => setShowPicker(p => !p)}

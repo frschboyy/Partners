@@ -303,7 +303,7 @@ function MainApp({ user }) {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-background overflow-hidden">
+    <div className="flex flex-col h-app-screen bg-background overflow-hidden">
       <OfflineBanner />
       <AnimatePresence>
         {activeTab === 'notifications' && (
