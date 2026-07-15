@@ -440,7 +440,10 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     const canSaveSticker = !isMe && msg.message_type === 'sticker' && !msg.is_deleted;
     const canReply = !msg.is_deleted && msg.message_type !== 'system';
     const canCopy = !msg.is_deleted && msg.message_type === 'text';
-    const canAct = canReply || canEdit || canDeleteAll || canSaveSticker;
+    // Even a message deleted for everyone still needs to be reachable — "Delete
+    // for Me" (always offered below) is the only action left at that point, but
+    // it has to stay available so the placeholder can be hidden from your own view.
+    const canAct = canReply || canEdit || canDeleteAll || canSaveSticker || msg.is_deleted;
     return { isMe, canEdit, canDeleteAll, canSaveSticker, canReply, canCopy, canAct };
   }
 
@@ -945,8 +948,9 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                   onContextMenu={e => { e.preventDefault(); if (canAct) openActionOverlay(msg.id); }}
                   onDoubleClick={() => { if (canAct) { setSelectedMessageId(msg.id); setActiveMessageId(null); setChevronMenuMsgId(null); } }}
                 >
-                  {/* Reply-to reference */}
-                  {replyTo && !replyTo.is_deleted && !hiddenMsgIds.has(replyTo.id) && (
+                  {/* Reply-to reference — hidden once either side of the reference is gone:
+                      the original being quoted, or this reply message itself. */}
+                  {replyTo && !replyTo.is_deleted && !msg.is_deleted && !hiddenMsgIds.has(replyTo.id) && (
                     <button
                       onClick={() => scrollToMessage(replyTo.id)}
                       className="max-w-[72%] text-left px-2.5 py-1.5 rounded-xl mb-1 border-l-2 transition-opacity hover:opacity-80 flex items-center gap-2"
@@ -1045,7 +1049,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                       transition={{ type: 'spring', damping: 20, stiffness: 400 }}
                       onClick={() => { if (isActive) closeActionOverlay(); }}
                     >
-                      {canAct && !msg.is_deleted && msg.message_type !== 'system' && (
+                      {canAct && msg.message_type !== 'system' && (
                         <button
                           onClick={e => { e.stopPropagation(); setChevronMenuMsgId(prev => prev === msg.id ? null : msg.id); }}
                           className="desktop-only absolute top-1.5 right-1.5 items-center justify-center w-5 h-5 rounded-full opacity-40 hover:opacity-100 transition-opacity"
