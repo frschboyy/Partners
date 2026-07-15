@@ -168,6 +168,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
   const bottomRef = useRef(null);
   const pickerRef = useRef(null);
   const chevronMenuRef = useRef(null);
+  const headerActionBarRef = useRef(null);
   const selectedPartnershipRef = useRef(null);
   const msgRefs = useRef({});
   const replyIconRefs = useRef({});
@@ -383,8 +384,11 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     if (!selectedMessageId) return;
     function onKeyDown(e) { if (e.key === 'Escape') setSelectedMessageId(null); }
     function onMouseDown(e) {
-      const el = msgRefs.current[selectedMessageId];
-      if (el && !el.contains(e.target)) setSelectedMessageId(null);
+      const rowEl = msgRefs.current[selectedMessageId];
+      const barEl = headerActionBarRef.current;
+      const insideRow = rowEl && rowEl.contains(e.target);
+      const insideBar = barEl && barEl.contains(e.target);
+      if (!insideRow && !insideBar) setSelectedMessageId(null);
     }
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('mousedown', onMouseDown);
@@ -973,7 +977,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
 
         {/* Header — swaps to a contextual action bar when a message is selected (desktop double-click) */}
         {selectedMsg ? (
-          <div className="flex items-center gap-2 px-3 py-3 border-b border-border flex-shrink-0">
+          <div ref={headerActionBarRef} className="flex items-center gap-2 px-3 py-3 border-b border-border flex-shrink-0">
             <button
               onClick={() => setSelectedMessageId(null)}
               className="p-2 rounded-full bg-secondary hover:opacity-75 transition-opacity"
