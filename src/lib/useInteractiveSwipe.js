@@ -23,7 +23,12 @@ export function useInteractiveSwipe({ order, activeId, onChange, isBlocked = def
   const dragX = useMotionValue(0);
   const [pending, setPending] = useState(null); // { id, direction: 1 | -1 }
 
-  const containerRef = useRef(null);
+  // A plain useRef here would silently never attach: this hook is typically
+  // called before a component's loading/auth-gated early returns, so on the
+  // first render the swipeable element doesn't exist yet. A callback ref +
+  // state re-fires the attach effect exactly when the node actually mounts.
+  const [containerEl, setContainerEl] = useState(null);
+  const containerRef = useCallback((node) => setContainerEl(node), []);
   const widthRef = useRef(0);
   const startX = useRef(null);
   const startY = useRef(null);
@@ -100,7 +105,7 @@ export function useInteractiveSwipe({ order, activeId, onChange, isBlocked = def
   }, [order]);
 
   useEffect(() => {
-    const el = containerRef.current;
+    const el = containerEl;
     if (!el) return;
 
     function onTouchStart(e) {
@@ -162,7 +167,7 @@ export function useInteractiveSwipe({ order, activeId, onChange, isBlocked = def
       el.removeEventListener('touchend', commitOrCancel);
       el.removeEventListener('touchcancel', commitOrCancel);
     };
-  }, [order, commitOrCancel]);
+  }, [containerEl, order, commitOrCancel]);
 
   // Animates a push transition programmatically (e.g. a tab-bar tap) using
   // the same commit animation as a completed drag, without any manual input.
@@ -174,7 +179,7 @@ export function useInteractiveSwipe({ order, activeId, onChange, isBlocked = def
       return;
     }
     const dir = targetIdx > activeIndexRef.current ? 1 : -1;
-    widthRef.current = containerRef.current?.clientWidth || window.innerWidth;
+    widthRef.current = containerEl?.clientWidth || window.innerWidth;
     directionRef.current = dir;
     setPendingState({ id, direction: dir });
     dragX.set(0);
@@ -183,7 +188,7 @@ export function useInteractiveSwipe({ order, activeId, onChange, isBlocked = def
       ...RELEASE_TRANSITION,
       onComplete: () => onChange(id),
     });
-  }, [order, activeId, onChange]);
+  }, [order, activeId, onChange, containerEl]);
 
   return {
     containerRef,
