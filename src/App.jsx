@@ -9,7 +9,7 @@ import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import AdminProtectedRoute from '@/components/admin/AdminProtectedRoute';
 import ScrollToTop from './components/ScrollToTop';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { api, supabase } from '@/api/supabaseClient';
 import { applyTheme, getSavedTheme, saveTheme, applyFontSize, getSavedFontSize, saveFontSize } from '@/lib/theme';
 import AdminLogin from './pages/admin/AdminLogin';
@@ -30,6 +30,7 @@ import BottomNav from './components/BottomNav';
 import NotificationsPanel from './components/NotificationsPanel';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useOnlineStatus } from '@/lib/useOnlineStatus';
+import { useInteractiveSwipe } from '@/lib/useInteractiveSwipe';
 
 // The app has no traditional page stack — the back button should never eject the
 // user to whatever was open before they launched it (e.g. the browser home screen).
@@ -46,13 +47,7 @@ function useBlockBrowserBack() {
   }, []);
 }
 
-const tabSlideVariants = {
-  enter: (dir) => ({ x: dir >= 0 ? '100%' : '-100%' }),
-  center: { x: 0 },
-  exit: (dir) => ({ x: dir >= 0 ? '-100%' : '100%' }),
-};
-
-const tabSlideTransition = { type: 'tween', ease: [0.32, 0.72, 0, 1], duration: 0.3 };
+const TAB_ORDER = ['home', 'feed', 'chat', 'leaderboard', 'settings'];
 
 function OfflineBanner() {
   const online = useOnlineStatus();
@@ -83,7 +78,6 @@ function MainApp({ user }) {
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [activeTab, setActiveTab] = useState(() => localStorage.getItem('accountable_last_tab') || 'home');
   const [prevTab, setPrevTab] = useState('home');
-  const [slideDir, setSlideDir] = useState(0);
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [currentTheme, setCurrentTheme] = useState(() => getSavedTheme().theme);
   const [darkMode, setDarkMode] = useState(() => getSavedTheme().darkMode);
@@ -214,41 +208,83 @@ function MainApp({ user }) {
     }
   }
 
-  const TAB_ORDER = ['home', 'feed', 'chat', 'leaderboard', 'settings'];
-
-  const swipeTouchStartX = useRef(null);
-  const swipeTouchStartY = useRef(null);
-  const swipeBlocked = useRef(false);
-
-  function handleSwipeTouchStart(e) {
-    swipeTouchStartX.current = e.touches[0].clientX;
-    swipeTouchStartY.current = e.touches[0].clientY;
-    swipeBlocked.current = !!e.target?.closest?.('[data-no-swipe-nav]');
-  }
-
-  function handleSwipeTouchEnd(e) {
-    if (swipeTouchStartX.current === null || swipeBlocked.current) return;
-    if (activeTab === 'notifications') return;
-    const dx = e.changedTouches[0].clientX - swipeTouchStartX.current;
-    const dy = e.changedTouches[0].clientY - swipeTouchStartY.current;
-    swipeTouchStartX.current = null;
-    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
-    const idx = TAB_ORDER.indexOf(activeTab);
-    if (dx < 0 && idx < TAB_ORDER.length - 1) handleTabChange(TAB_ORDER[idx + 1]);
-    else if (dx > 0 && idx > 0) handleTabChange(TAB_ORDER[idx - 1]);
-  }
-
   function handleTabChange(tab) {
     if (tab === 'feed') setNewFeedPosts(false);
     if (tab === 'notifications') setUnreadNotifications(0);
     if (tab !== 'notifications') {
-      const prevIdx = TAB_ORDER.indexOf(activeTab);
-      const nextIdx = TAB_ORDER.indexOf(tab);
-      setSlideDir(nextIdx >= prevIdx ? 1 : -1);
       if (activeTab !== 'notifications') setPrevTab(activeTab);
       localStorage.setItem('accountable_last_tab', tab);
     }
     setActiveTab(tab);
+  }
+
+  const { containerRef, dragX, neighborX, pending, pushTo, handlers } = useInteractiveSwipe({
+    order: TAB_ORDER,
+    activeId: activeTab,
+    onChange: handleTabChange,
+    isBlocked: (e) => activeTab === 'notifications' || !!e.target?.closest?.('[data-no-swipe-nav]'),
+  });
+
+  // Tab-bar taps replay the same push animation as a completed drag, just without manual input.
+  function navigateToTab(tab) {
+    if (TAB_ORDER.includes(tab)) pushTo(tab);
+    else handleTabChange(tab);
+  }
+
+  function renderTabContent(tab) {
+    if (tab === 'home') {
+      return (
+        <div className="h-full overflow-y-auto">
+          <Home
+            currentUser={user}
+            profile={profile}
+            onProfileUpdate={setProfile}
+            navIntent={navIntent}
+            onClearNavIntent={() => setNavIntent(null)}
+          />
+        </div>
+      );
+    }
+    if (tab === 'feed') {
+      return (
+        <div className="h-full">
+          <Feed currentUser={user} profile={profile} />
+        </div>
+      );
+    }
+    if (tab === 'chat') {
+      return (
+        <div className="h-full overflow-y-auto">
+          <Chat currentUser={user} profile={profile} onTabChange={navigateToTab} navIntent={navIntent} onClearNavIntent={() => setNavIntent(null)} />
+        </div>
+      );
+    }
+    if (tab === 'leaderboard') {
+      return (
+        <div className="h-full overflow-y-auto">
+          <Leaderboard currentUser={user} profile={profile} onTabChange={navigateToTab} />
+        </div>
+      );
+    }
+    if (tab === 'settings') {
+      return (
+        <div className="h-full overflow-y-auto">
+          <Settings
+            currentUser={user}
+            profile={profile}
+            onProfileUpdate={setProfile}
+            currentTheme={currentTheme}
+            darkMode={darkMode}
+            onThemeChange={setCurrentTheme}
+            onDarkModeChange={setDarkMode}
+            scrollToSection={settingsSection}
+            onSectionHandled={() => setSettingsSection(null)}
+          />
+        </div>
+      );
+    }
+    if (tab === 'notifications') return <div className="h-full" />;
+    return null;
   }
 
   if (loadingProfile) {
@@ -279,70 +315,25 @@ function MainApp({ user }) {
       </AnimatePresence>
       {/* Page content */}
       <div
+        ref={containerRef}
         className="flex-1 overflow-hidden relative"
-        onTouchStart={handleSwipeTouchStart}
-        onTouchEnd={handleSwipeTouchEnd}
+        onTouchStart={handlers.onTouchStart}
+        onTouchMove={handlers.onTouchMove}
+        onTouchEnd={handlers.onTouchEnd}
       >
-        <AnimatePresence initial={false} custom={slideDir}>
-          <motion.div
-            key={activeTab}
-            custom={slideDir}
-            variants={tabSlideVariants}
-            initial="enter"
-            animate="center"
-            exit="exit"
-            transition={tabSlideTransition}
-            className="absolute inset-0"
-          >
-            {activeTab === 'home' && (
-              <div className="h-full overflow-y-auto">
-                <Home
-                  currentUser={user}
-                  profile={profile}
-                  onProfileUpdate={setProfile}
-                  navIntent={navIntent}
-                  onClearNavIntent={() => setNavIntent(null)}
-                />
-              </div>
-            )}
-            {activeTab === 'feed' && (
-              <div className="h-full">
-                <Feed currentUser={user} profile={profile} />
-              </div>
-            )}
-            {activeTab === 'chat' && (
-              <div className="h-full overflow-y-auto">
-                <Chat currentUser={user} profile={profile} onTabChange={handleTabChange} navIntent={navIntent} onClearNavIntent={() => setNavIntent(null)} />
-              </div>
-            )}
-            {activeTab === 'leaderboard' && (
-              <div className="h-full overflow-y-auto">
-                <Leaderboard currentUser={user} profile={profile} onTabChange={handleTabChange} />
-              </div>
-            )}
-            {activeTab === 'settings' && (
-              <div className="h-full overflow-y-auto">
-                <Settings
-                  currentUser={user}
-                  profile={profile}
-                  onProfileUpdate={setProfile}
-                  currentTheme={currentTheme}
-                  darkMode={darkMode}
-                  onThemeChange={setCurrentTheme}
-                  onDarkModeChange={setDarkMode}
-                  scrollToSection={settingsSection}
-                  onSectionHandled={() => setSettingsSection(null)}
-                />
-              </div>
-            )}
-            {activeTab === 'notifications' && <div className="h-full" />}
+        <motion.div className="absolute inset-0" style={{ x: dragX }}>
+          {renderTabContent(activeTab)}
+        </motion.div>
+        {pending && (
+          <motion.div className="absolute inset-0" style={{ x: neighborX }}>
+            {renderTabContent(pending.id)}
           </motion.div>
-        </AnimatePresence>
+        )}
       </div>
 
       <BottomNav
         activeTab={activeTab}
-        onTabChange={tab => handleTabChange(tab)}
+        onTabChange={navigateToTab}
         unreadMessages={unreadMessages}
         unreadNotifications={unreadNotifications}
         feedHasNew={newFeedPosts}

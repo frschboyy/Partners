@@ -1,25 +1,71 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/api/supabaseClient';
 import { Trophy, Flame, Camera, Dumbbell, Crown, AlertCircle, Users, Banknote } from 'lucide-react';
 import Avatar from '@/components/Avatar';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
+import { useInteractiveSwipe } from '@/lib/useInteractiveSwipe';
 
-const tabSlideVariants = {
-  enter: (dir) => ({ x: dir >= 0 ? '100%' : '-100%' }),
-  center: { x: 0 },
-  exit: (dir) => ({ x: dir >= 0 ? '-100%' : '100%' }),
-};
+const TABS = [
+  { id: 'streak',        label: 'Streak',       icon: Flame },
+  { id: 'posting',       label: 'Posting',       icon: Camera },
+  { id: 'gym',           label: 'Gym',           icon: Dumbbell },
+  { id: 'self-slips',    label: 'Self Slips',    icon: AlertCircle },
+  { id: 'partner-slips', label: 'Partner Slips', icon: Users },
+  { id: 'balance',       label: 'Ledger',        icon: Banknote },
+];
+const TAB_ORDER = TABS.map(t => t.id);
 
-const tabSlideTransition = { type: 'tween', ease: [0.32, 0.72, 0, 1], duration: 0.3 };
+function isSlipTab(tab) { return tab === 'self-slips' || tab === 'partner-slips'; }
+function isBalanceTab(tab) { return tab === 'balance'; }
+
+function getSorted(entries, tab) {
+  return [...entries].sort((a, b) => {
+    if (tab === 'streak')        return b.bestStreak - a.bestStreak;
+    if (tab === 'posting')       return b.postStreak - a.postStreak;
+    if (tab === 'gym')           return b.gymCount - a.gymCount;
+    if (tab === 'self-slips')    return a.selfSlipCount - b.selfSlipCount;
+    if (tab === 'partner-slips') return a.partnerSlipCount - b.partnerSlipCount;
+    if (tab === 'balance')       return b.allTimeNet - a.allTimeNet;
+    return 0;
+  });
+}
+
+function getMetric(entry, tab, currencyLabel) {
+  if (tab === 'streak')        return `${entry.bestStreak} days`;
+  if (tab === 'posting')       return `${entry.postStreak} day streak`;
+  if (tab === 'gym')           return `${entry.gymCount} workouts`;
+  if (tab === 'self-slips')    return `${entry.selfSlipCount} slip${entry.selfSlipCount !== 1 ? 's' : ''} · ${currencyLabel} ${entry.selfSlipPenalty.toFixed(0)} (50% off)`;
+  if (tab === 'partner-slips') return `${entry.partnerSlipCount} slip${entry.partnerSlipCount !== 1 ? 's' : ''} · ${currencyLabel} ${entry.partnerSlipPenalty.toFixed(0)}`;
+  if (tab === 'balance')       return `Paid: ${currencyLabel} ${entry.allTimePaid} · Received: ${currencyLabel} ${entry.allTimeReceived}`;
+}
+
+function getBigDisplay(entry, tab, currencyLabel) {
+  if (tab === 'streak')        return { value: entry.bestStreak, sub: null };
+  if (tab === 'posting')       return { value: entry.postStreak, sub: null };
+  if (tab === 'gym')           return { value: entry.gymCount, sub: null };
+  if (tab === 'self-slips')    return { value: entry.selfSlipCount, sub: null };
+  if (tab === 'partner-slips') return { value: entry.partnerSlipCount, sub: null };
+  if (tab === 'balance') {
+    const sign = entry.allTimeNet > 0 ? '+' : '';
+    return { value: `${sign}${entry.allTimeNet}`, sub: currencyLabel };
+  }
+}
+
+function getBigColor(entry, tab) {
+  if (isSlipTab(tab)) return 'hsl(var(--destructive))';
+  if (isBalanceTab(tab)) {
+    if (entry.allTimeNet > 0) return 'hsl(var(--theme-accent))';
+    if (entry.allTimeNet < 0) return 'hsl(var(--destructive))';
+    return 'hsl(var(--muted-foreground))';
+  }
+  return 'hsl(var(--theme-accent))';
+}
 
 export default function Leaderboard({ currentUser, profile, onTabChange }) {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('streak');
-  const [slideDir, setSlideDir] = useState(0);
   const tabBarRef = useRef(null);
-  const swipeStartX = useRef(null);
-  const swipeStartY = useRef(null);
 
   const currencyLabel = profile?.currency_label || 'KSH';
 
@@ -182,90 +228,176 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
     setLoading(false);
   }
 
-  const tabs = [
-    { id: 'streak',        label: 'Streak',       icon: Flame },
-    { id: 'posting',       label: 'Posting',       icon: Camera },
-    { id: 'gym',           label: 'Gym',           icon: Dumbbell },
-    { id: 'self-slips',    label: 'Self Slips',    icon: AlertCircle },
-    { id: 'partner-slips', label: 'Partner Slips', icon: Users },
-    { id: 'balance',       label: 'Ledger',        icon: Banknote },
-  ];
+  const { containerRef, dragX, neighborX, pending, pushTo, handlers } = useInteractiveSwipe({
+    order: TAB_ORDER,
+    activeId: activeTab,
+    onChange: setActiveTab,
+    isBlocked: (e) => !!tabBarRef.current?.contains(e.target),
+  });
 
-  const isSlipTab = activeTab === 'self-slips' || activeTab === 'partner-slips';
-  const isBalanceTab = activeTab === 'balance';
+  function renderTabBody(tab) {
+    const slipTab = isSlipTab(tab);
+    const balanceTab = isBalanceTab(tab);
+    const sorted = getSorted(entries, tab);
 
-  const sorted = useMemo(() => [...entries].sort((a, b) => {
-    if (activeTab === 'streak')        return b.bestStreak - a.bestStreak;
-    if (activeTab === 'posting')       return b.postStreak - a.postStreak;
-    if (activeTab === 'gym')           return b.gymCount - a.gymCount;
-    if (activeTab === 'self-slips')    return a.selfSlipCount - b.selfSlipCount;
-    if (activeTab === 'partner-slips') return a.partnerSlipCount - b.partnerSlipCount;
-    if (activeTab === 'balance')       return b.allTimeNet - a.allTimeNet;
-    return 0;
-  }), [entries, activeTab]);
+    return (
+      <>
+        {/* Section subtitle */}
+        {slipTab && (
+          <p className="text-center text-xs text-muted-foreground mb-3 px-4">
+            {tab === 'self-slips'
+              ? 'Self-reported · penalty reduced by 50%'
+              : 'Reported by your partner · full penalty applies'}
+          </p>
+        )}
+        {balanceTab && (
+          <p className="text-center text-xs text-muted-foreground mb-3 px-4">
+            All-time penalties paid vs received · permanent record
+          </p>
+        )}
 
-  function getMetric(entry) {
-    if (activeTab === 'streak')        return `${entry.bestStreak} days`;
-    if (activeTab === 'posting')       return `${entry.postStreak} day streak`;
-    if (activeTab === 'gym')           return `${entry.gymCount} workouts`;
-    if (activeTab === 'self-slips')    return `${entry.selfSlipCount} slip${entry.selfSlipCount !== 1 ? 's' : ''} · ${currencyLabel} ${entry.selfSlipPenalty.toFixed(0)} (50% off)`;
-    if (activeTab === 'partner-slips') return `${entry.partnerSlipCount} slip${entry.partnerSlipCount !== 1 ? 's' : ''} · ${currencyLabel} ${entry.partnerSlipPenalty.toFixed(0)}`;
-    if (activeTab === 'balance')       return `Paid: ${currencyLabel} ${entry.allTimePaid} · Received: ${currencyLabel} ${entry.allTimeReceived}`;
-  }
+        <div className="flex-1 overflow-y-auto px-4 space-y-2 pb-6">
+          {loading ? (
+            <div className="space-y-2">
+              {[1, 2, 3].map(i => (
+                <div key={i} className="flex items-center gap-3 p-4 rounded-xl border border-border animate-pulse">
+                  <div className="w-8 h-8 rounded bg-muted" />
+                  <div className="w-10 h-10 rounded-full bg-muted" />
+                  <div className="flex-1 space-y-2">
+                    <div className="h-3 bg-muted rounded w-28" />
+                    <div className="h-3 bg-muted rounded w-20" />
+                  </div>
+                  <div className="h-6 w-10 bg-muted rounded" />
+                </div>
+              ))}
+            </div>
+          ) : sorted.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-4 text-center px-6">
+              <motion.span
+                className="text-5xl"
+                animate={{ scale: [1, 1.08, 1] }}
+                transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+              >
+                🏆
+              </motion.span>
+              <div className="space-y-1">
+                <p className="font-bold">No rankings yet</p>
+                <p className="text-sm text-muted-foreground">Rankings appear once you form a partnership and start logging streaks together.</p>
+              </div>
+              {onTabChange && (
+                <motion.button
+                  whileTap={{ scale: 0.94 }}
+                  onClick={() => onTabChange('home')}
+                  animate={{ boxShadow: ['0 0 0 0px hsl(var(--theme-accent)/0.4)', '0 0 0 7px hsl(var(--theme-accent)/0)', '0 0 0 0px hsl(var(--theme-accent)/0.4)'] }}
+                  transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm"
+                  style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
+                >
+                  Find a partner on Home →
+                </motion.button>
+              )}
+            </div>
+          ) : (
+            sorted.map((entry, idx) => {
+              const rankEmoji = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`;
+              const display = getBigDisplay(entry, tab, currencyLabel);
+              const bigColor = getBigColor(entry, tab);
+              const showCrown = idx === 0 && !slipTab;
 
-  function getBigDisplay(entry) {
-    if (activeTab === 'streak')        return { value: entry.bestStreak, sub: null };
-    if (activeTab === 'posting')       return { value: entry.postStreak, sub: null };
-    if (activeTab === 'gym')           return { value: entry.gymCount, sub: null };
-    if (activeTab === 'self-slips')    return { value: entry.selfSlipCount, sub: null };
-    if (activeTab === 'partner-slips') return { value: entry.partnerSlipCount, sub: null };
-    if (activeTab === 'balance') {
-      const sign = entry.allTimeNet > 0 ? '+' : '';
-      return { value: `${sign}${entry.allTimeNet}`, sub: currencyLabel };
-    }
-  }
+              return (
+                <motion.div
+                  key={entry.userId}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: idx * 0.05 }}
+                  className={`flex items-center gap-3 p-4 rounded-xl border transition-all ${
+                    entry.isMe ? 'border-primary bg-accent-muted' : 'border-border bg-card'
+                  }`}
+                  style={entry.isMe
+                    ? { boxShadow: '3px 3px 0px hsl(var(--theme-accent) / 0.3)' }
+                    : { boxShadow: '3px 3px 0px hsl(var(--border))' }}
+                >
+                  <span className="text-2xl w-8 text-center">{rankEmoji}</span>
+                  <Avatar profile={entry.profile} size="sm" noAutoFlip />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-sm">
+                      {entry.name}
+                      {entry.isMe && <span className="ml-1.5 text-xs text-muted-foreground">(you)</span>}
+                    </p>
+                    <p className="text-xs text-muted-foreground truncate">{getMetric(entry, tab, currencyLabel)}</p>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <p className="text-xl font-bold font-display-mono leading-none" style={{ color: bigColor }}>
+                      {display.value}
+                    </p>
+                    {display.sub && (
+                      <p className="text-[10px] text-muted-foreground mt-0.5">{display.sub}</p>
+                    )}
+                  </div>
+                  {showCrown && (
+                    <Crown size={18} style={{ color: 'hsl(var(--theme-accent))' }} />
+                  )}
+                </motion.div>
+              );
+            })
+          )}
 
-  function getBigColor(entry) {
-    if (isSlipTab) return 'hsl(var(--destructive))';
-    if (isBalanceTab) {
-      if (entry.allTimeNet > 0) return 'hsl(var(--theme-accent))';
-      if (entry.allTimeNet < 0) return 'hsl(var(--destructive))';
-      return 'hsl(var(--muted-foreground))';
-    }
-    return 'hsl(var(--theme-accent))';
-  }
-
-  function changeTab(id) {
-    const prevIdx = tabs.findIndex(t => t.id === activeTab);
-    const nextIdx = tabs.findIndex(t => t.id === id);
-    setSlideDir(nextIdx >= prevIdx ? 1 : -1);
-    setActiveTab(id);
-  }
-
-  function handleTouchStart(e) {
-    if (tabBarRef.current?.contains(e.target)) return;
-    swipeStartX.current = e.touches[0].clientX;
-    swipeStartY.current = e.touches[0].clientY;
-  }
-
-  function handleTouchEnd(e) {
-    if (swipeStartX.current === null) return;
-    const dx = e.changedTouches[0].clientX - swipeStartX.current;
-    const dy = e.changedTouches[0].clientY - swipeStartY.current;
-    swipeStartX.current = null;
-    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
-    const idx = tabs.findIndex(t => t.id === activeTab);
-    if (dx < 0 && idx < tabs.length - 1) changeTab(tabs[idx + 1].id);
-    else if (dx > 0 && idx > 0) changeTab(tabs[idx - 1].id);
+          {/* All-time balance breakdown for current user */}
+          {balanceTab && !loading && entries.length > 0 && (() => {
+            const me = entries.find(e => e.isMe);
+            if (!me) return null;
+            return (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: entries.length * 0.05 + 0.1 }}
+                className="mt-2 rounded-xl border border-border bg-card p-4 space-y-3"
+                style={{ boxShadow: '3px 3px 0px hsl(var(--border))' }}
+              >
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Your breakdown</p>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="text-center">
+                    <p className="text-xs text-muted-foreground mb-1">Paid out</p>
+                    <p className="font-bold text-base font-display-mono text-destructive">
+                      {me.allTimePaid}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">{currencyLabel}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-xs text-muted-foreground mb-1">Received</p>
+                    <p className="font-bold text-base font-display-mono" style={{ color: 'hsl(var(--theme-accent))' }}>
+                      {me.allTimeReceived}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">{currencyLabel}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-xs text-muted-foreground mb-1">Net</p>
+                    <p
+                      className="font-bold text-base font-display-mono"
+                      style={{ color: me.allTimeNet > 0 ? 'hsl(var(--theme-accent))' : me.allTimeNet < 0 ? 'hsl(var(--destructive))' : 'hsl(var(--muted-foreground))' }}
+                    >
+                      {me.allTimeNet > 0 ? '+' : ''}{me.allTimeNet}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">{currencyLabel}</p>
+                  </div>
+                </div>
+                <p className="text-[10px] text-muted-foreground text-center">
+                  {me.allTimeNet > 0
+                    ? `Partners have paid you ${me.allTimeNet} ${currencyLabel} more than you've paid them.`
+                    : me.allTimeNet < 0
+                    ? `You've paid ${Math.abs(me.allTimeNet)} ${currencyLabel} more than your partners have paid you.`
+                    : "Perfectly even — same amount exchanged both ways."}
+                </p>
+              </motion.div>
+            );
+          })()}
+        </div>
+      </>
+    );
   }
 
   return (
-    <div
-      className="flex flex-col h-full bg-background"
-      data-no-swipe-nav
-      onTouchStart={handleTouchStart}
-      onTouchEnd={handleTouchEnd}
-    >
+    <div className="flex flex-col h-full bg-background" data-no-swipe-nav>
       <div className="px-4 pt-6 pb-4">
         <div className="flex items-center gap-2">
           <Trophy size={22} style={{ color: 'hsl(var(--theme-accent))' }} />
@@ -276,10 +408,10 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
 
       {/* Tabs */}
       <div ref={tabBarRef} className="flex gap-1.5 px-4 mb-4 overflow-x-auto pb-1 scrollbar-none">
-        {tabs.map(({ id, label, icon: Icon }) => (
+        {TABS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
-            onClick={() => changeTab(id)}
+            onClick={() => pushTo(id)}
             className={`flex items-center justify-center gap-1.5 flex-shrink-0 px-3 py-2 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
               activeTab === id ? 'text-primary-foreground' : 'bg-secondary text-muted-foreground'
             }`}
@@ -291,170 +423,21 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
         ))}
       </div>
 
-      <div className="flex-1 overflow-hidden relative">
-        <AnimatePresence initial={false} custom={slideDir}>
-          <motion.div
-            key={activeTab}
-            custom={slideDir}
-            variants={tabSlideVariants}
-            initial="enter"
-            animate="center"
-            exit="exit"
-            transition={tabSlideTransition}
-            className="absolute inset-0 flex flex-col"
-          >
-      {/* Section subtitle */}
-      {isSlipTab && (
-        <p className="text-center text-xs text-muted-foreground mb-3 px-4">
-          {activeTab === 'self-slips'
-            ? 'Self-reported · penalty reduced by 50%'
-            : 'Reported by your partner · full penalty applies'}
-        </p>
-      )}
-      {isBalanceTab && (
-        <p className="text-center text-xs text-muted-foreground mb-3 px-4">
-          All-time penalties paid vs received · permanent record
-        </p>
-      )}
-
-      <div className="flex-1 overflow-y-auto px-4 space-y-2 pb-6">
-        {loading ? (
-          <div className="space-y-2">
-            {[1, 2, 3].map(i => (
-              <div key={i} className="flex items-center gap-3 p-4 rounded-xl border border-border animate-pulse">
-                <div className="w-8 h-8 rounded bg-muted" />
-                <div className="w-10 h-10 rounded-full bg-muted" />
-                <div className="flex-1 space-y-2">
-                  <div className="h-3 bg-muted rounded w-28" />
-                  <div className="h-3 bg-muted rounded w-20" />
-                </div>
-                <div className="h-6 w-10 bg-muted rounded" />
-              </div>
-            ))}
-          </div>
-        ) : sorted.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 gap-4 text-center px-6">
-            <motion.span
-              className="text-5xl"
-              animate={{ scale: [1, 1.08, 1] }}
-              transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
-            >
-              🏆
-            </motion.span>
-            <div className="space-y-1">
-              <p className="font-bold">No rankings yet</p>
-              <p className="text-sm text-muted-foreground">Rankings appear once you form a partnership and start logging streaks together.</p>
-            </div>
-            {onTabChange && (
-              <motion.button
-                whileTap={{ scale: 0.94 }}
-                onClick={() => onTabChange('home')}
-                animate={{ boxShadow: ['0 0 0 0px hsl(var(--theme-accent)/0.4)', '0 0 0 7px hsl(var(--theme-accent)/0)', '0 0 0 0px hsl(var(--theme-accent)/0.4)'] }}
-                transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm"
-                style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
-              >
-                Find a partner on Home →
-              </motion.button>
-            )}
-          </div>
-        ) : (
-          sorted.map((entry, idx) => {
-            const rankEmoji = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`;
-            const display = getBigDisplay(entry);
-            const bigColor = getBigColor(entry);
-            const showCrown = idx === 0 && !isSlipTab;
-
-            return (
-              <motion.div
-                key={entry.userId}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: idx * 0.05 }}
-                className={`flex items-center gap-3 p-4 rounded-xl border transition-all ${
-                  entry.isMe ? 'border-primary bg-accent-muted' : 'border-border bg-card'
-                }`}
-                style={entry.isMe
-                  ? { boxShadow: '3px 3px 0px hsl(var(--theme-accent) / 0.3)' }
-                  : { boxShadow: '3px 3px 0px hsl(var(--border))' }}
-              >
-                <span className="text-2xl w-8 text-center">{rankEmoji}</span>
-                <Avatar profile={entry.profile} size="sm" noAutoFlip />
-                <div className="flex-1 min-w-0">
-                  <p className="font-bold text-sm">
-                    {entry.name}
-                    {entry.isMe && <span className="ml-1.5 text-xs text-muted-foreground">(you)</span>}
-                  </p>
-                  <p className="text-xs text-muted-foreground truncate">{getMetric(entry)}</p>
-                </div>
-                <div className="text-right flex-shrink-0">
-                  <p className="text-xl font-bold font-display-mono leading-none" style={{ color: bigColor }}>
-                    {display.value}
-                  </p>
-                  {display.sub && (
-                    <p className="text-[10px] text-muted-foreground mt-0.5">{display.sub}</p>
-                  )}
-                </div>
-                {showCrown && (
-                  <Crown size={18} style={{ color: 'hsl(var(--theme-accent))' }} />
-                )}
-              </motion.div>
-            );
-          })
-        )}
-
-        {/* All-time balance breakdown for current user */}
-        {isBalanceTab && !loading && entries.length > 0 && (() => {
-          const me = entries.find(e => e.isMe);
-          if (!me) return null;
-          return (
-            <motion.div
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: entries.length * 0.05 + 0.1 }}
-              className="mt-2 rounded-xl border border-border bg-card p-4 space-y-3"
-              style={{ boxShadow: '3px 3px 0px hsl(var(--border))' }}
-            >
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Your breakdown</p>
-              <div className="grid grid-cols-3 gap-3">
-                <div className="text-center">
-                  <p className="text-xs text-muted-foreground mb-1">Paid out</p>
-                  <p className="font-bold text-base font-display-mono text-destructive">
-                    {me.allTimePaid}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground">{currencyLabel}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-xs text-muted-foreground mb-1">Received</p>
-                  <p className="font-bold text-base font-display-mono" style={{ color: 'hsl(var(--theme-accent))' }}>
-                    {me.allTimeReceived}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground">{currencyLabel}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-xs text-muted-foreground mb-1">Net</p>
-                  <p
-                    className="font-bold text-base font-display-mono"
-                    style={{ color: me.allTimeNet > 0 ? 'hsl(var(--theme-accent))' : me.allTimeNet < 0 ? 'hsl(var(--destructive))' : 'hsl(var(--muted-foreground))' }}
-                  >
-                    {me.allTimeNet > 0 ? '+' : ''}{me.allTimeNet}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground">{currencyLabel}</p>
-                </div>
-              </div>
-              <p className="text-[10px] text-muted-foreground text-center">
-                {me.allTimeNet > 0
-                  ? `Partners have paid you ${me.allTimeNet} ${currencyLabel} more than you've paid them.`
-                  : me.allTimeNet < 0
-                  ? `You've paid ${Math.abs(me.allTimeNet)} ${currencyLabel} more than your partners have paid you.`
-                  : "Perfectly even — same amount exchanged both ways."}
-              </p>
-            </motion.div>
-          );
-        })()}
-      </div>
+      <div
+        ref={containerRef}
+        className="flex-1 overflow-hidden relative"
+        onTouchStart={handlers.onTouchStart}
+        onTouchMove={handlers.onTouchMove}
+        onTouchEnd={handlers.onTouchEnd}
+      >
+        <motion.div className="absolute inset-0 flex flex-col" style={{ x: dragX }}>
+          {renderTabBody(activeTab)}
+        </motion.div>
+        {pending && (
+          <motion.div className="absolute inset-0 flex flex-col" style={{ x: neighborX }}>
+            {renderTabBody(pending.id)}
           </motion.div>
-        </AnimatePresence>
+        )}
       </div>
     </div>
   );
