@@ -85,6 +85,7 @@ function MainApp({ user }) {
   const [newFeedPosts, setNewFeedPosts] = useState(false);
   const [settingsSection, setSettingsSection] = useState(null);
   const [navIntent, setNavIntent] = useState(null);
+  const [chatWantsNavHidden, setChatWantsNavHidden] = useState(false);
 
   useEffect(() => {
     applyTheme(currentTheme, darkMode);
@@ -258,7 +259,14 @@ function MainApp({ user }) {
         // message list) — an outer overflow-y-auto here would let the whole thing scroll
         // as one blob, dragging the header and composer along with the conversation.
         <div className="h-full overflow-hidden">
-          <Chat currentUser={user} profile={profile} onTabChange={navigateToTab} navIntent={navIntent} onClearNavIntent={() => setNavIntent(null)} />
+          <Chat
+            currentUser={user}
+            profile={profile}
+            onTabChange={navigateToTab}
+            navIntent={navIntent}
+            onClearNavIntent={() => setNavIntent(null)}
+            onHideNavChange={setChatWantsNavHidden}
+          />
         </div>
       );
     }
@@ -338,6 +346,7 @@ function MainApp({ user }) {
         unreadMessages={unreadMessages}
         unreadNotifications={unreadNotifications}
         feedHasNew={newFeedPosts}
+        hidden={activeTab === 'chat' && chatWantsNavHidden}
       />
     </div>
   );

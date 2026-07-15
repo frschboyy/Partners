@@ -12,9 +12,12 @@ const TABS = [
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
-export default function BottomNav({ activeTab, onTabChange, unreadMessages = 0, unreadNotifications = 0, feedHasNew = false }) {
+export default function BottomNav({ activeTab, onTabChange, unreadMessages = 0, unreadNotifications = 0, feedHasNew = false, hidden = false }) {
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-card border-t border-border"
+    <motion.nav
+      animate={{ y: hidden ? '100%' : 0 }}
+      transition={{ type: 'tween', duration: 0.25, ease: 'easeInOut' }}
+      className="fixed bottom-0 left-0 right-0 z-40 bg-card border-t border-border"
       style={{ paddingBottom: 'env(safe-area-inset-bottom, 8px)' }}>
       <div className="flex items-center justify-around h-16 max-w-lg mx-auto px-1">
         {TABS.map(({ id, label, icon: Icon }) => {
@@ -60,6 +63,6 @@ export default function BottomNav({ activeTab, onTabChange, unreadMessages = 0, 
           );
         })}
       </div>
-    </nav>
+    </motion.nav>
   );
 }

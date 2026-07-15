@@ -130,7 +130,7 @@ function formatDateSeparator(dateStr) {
     : { month: 'long', day: 'numeric', year: 'numeric' });
 }
 
-export default function Chat({ currentUser, profile, onTabChange, navIntent, onClearNavIntent }) {
+export default function Chat({ currentUser, profile, onTabChange, navIntent, onClearNavIntent, onHideNavChange }) {
   const [partnerships, setPartnerships] = useState([]);
   const [loadingPartnerships, setLoadingPartnerships] = useState(true);
   const [partnerProfiles, setPartnerProfiles] = useState({});
@@ -177,6 +177,8 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
   const typingThrottleRef = useRef(null);
   const longPressTimer = useRef(null);
   const longPressActivated = useRef(false);
+  const lastScrollTopRef = useRef(0);
+  const navRevealTimerRef = useRef(null);
 
   // Keep a mutable ref in sync so the global ChatMessage subscription (which only
   // mounts once on [currentUser]) can read the current chat without being re-subscribed.
@@ -276,6 +278,18 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
       typingTimersRef.current = {};
     };
   }, [partnerships]);
+
+  // Bottom nav stays hidden by default inside an open conversation, reappearing
+  // only briefly when the user scrolls down through the message history (see
+  // handleMessagesScroll) — restored to normal as soon as the conversation closes.
+  useEffect(() => {
+    if (!selectedPartnership) return;
+    onHideNavChange?.(true);
+    return () => {
+      clearTimeout(navRevealTimerRef.current);
+      onHideNavChange?.(false);
+    };
+  }, [selectedPartnership]);
 
   useEffect(() => {
     if (!selectedPartnership) return;
@@ -535,6 +549,20 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
 
   function scrollToMessage(msgId) {
     msgRefs.current[msgId]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  // Nav is hidden by default in this view; scrolling down through history reveals
+  // it briefly, then it hides itself again after a pause. Scrolling up never
+  // reveals it — only downward motion does, per the requested behavior.
+  function handleMessagesScroll(e) {
+    const scrollTop = e.currentTarget.scrollTop;
+    const goingDown = scrollTop > lastScrollTopRef.current + 2;
+    lastScrollTopRef.current = scrollTop;
+    if (!goingDown) return;
+
+    onHideNavChange?.(false);
+    clearTimeout(navRevealTimerRef.current);
+    navRevealTimerRef.current = setTimeout(() => onHideNavChange?.(true), 1500);
   }
 
   function getMsgPermissions(msg) {
@@ -1015,7 +1043,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
         )}
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="flex-1 overflow-y-auto p-4 space-y-3" onScroll={handleMessagesScroll}>
           {loadingMessages ? (
             <div className="space-y-3 animate-pulse pt-2">
               {[
