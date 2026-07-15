@@ -241,10 +241,40 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
           }
         }
       )
-      .subscribe();
+      .subscribe(status => {
+        // Diagnostic: if this never logs SUBSCRIBED, or logs CHANNEL_ERROR/TIMED_OUT,
+        // realtime isn't actually connected — most likely `chat_messages` was never
+        // added to the `supabase_realtime` publication (see migration 002/comment
+        // below), rather than anything wrong with this subscription code.
+        if (status !== 'SUBSCRIBED') console.warn('[chat realtime]', status, 'for partnership', pid);
+      });
+
+    // Safety net: don't depend entirely on the websocket subscription above — if
+    // realtime silently isn't delivering events (misconfigured publication, a
+    // dropped connection, etc.), this keeps the thread converging on the real
+    // state within a few seconds instead of going stale until the user re-opens it.
+    const pollInterval = setInterval(async () => {
+      try {
+        const latest = await api.entities.ChatMessage.filter({ partnership_id: pid }, '-created_at', 100);
+        const latestMap = new Map(latest.map(m => [m.id, m]));
+        setMessages(prev => {
+          let changed = false;
+          const merged = prev.map(m => {
+            const fresh = latestMap.get(m.id);
+            if (fresh && JSON.stringify(fresh) !== JSON.stringify(m)) { changed = true; return fresh; }
+            return m;
+          });
+          const localIds = new Set(prev.map(m => m.id));
+          const missing = latest.filter(m => !localIds.has(m.id));
+          if (!missing.length) return changed ? merged : prev;
+          return [...merged, ...missing].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+        });
+      } catch (_) {}
+    }, 4000);
 
     return () => {
       supabase.removeChannel(channel);
+      clearInterval(pollInterval);
       setUnreadCounts(prev => ({ ...prev, [pid]: 0 }));
     };
   }, [selectedPartnership]);
