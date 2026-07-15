@@ -218,7 +218,7 @@ function MainApp({ user }) {
     setActiveTab(tab);
   }
 
-  const { containerRef, dragX, neighborX, pending, pushTo, handlers } = useInteractiveSwipe({
+  const { containerRef, dragX, neighborX, pending, pushTo } = useInteractiveSwipe({
     order: TAB_ORDER,
     activeId: activeTab,
     onChange: handleTabChange,
@@ -317,9 +317,7 @@ function MainApp({ user }) {
       <div
         ref={containerRef}
         className="flex-1 overflow-hidden relative"
-        onTouchStart={handlers.onTouchStart}
-        onTouchMove={handlers.onTouchMove}
-        onTouchEnd={handlers.onTouchEnd}
+        style={{ touchAction: 'pan-y' }}
       >
         <motion.div className="absolute inset-0" style={{ x: dragX }}>
           {renderTabContent(activeTab)}
