@@ -157,7 +157,6 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
   const bottomRef = useRef(null);
   const pickerRef = useRef(null);
   const chevronMenuRef = useRef(null);
-  const headerActionBarRef = useRef(null);
   const selectedPartnershipRef = useRef(null);
   const msgRefs = useRef({});
   const replyIconRefs = useRef({});
@@ -398,28 +397,12 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     if (el) setSelectionAnchorRect(el.getBoundingClientRect());
   }, [selectedMessageIds]);
 
-  // Esc, or a click outside both the selected messages and the action bar itself,
-  // clears the selection. Checking against every selected row (not just one) is
-  // what makes this work correctly in multi-select, on both mobile and desktop.
-  useEffect(() => {
-    if (!selectedMessageIds.size) return;
-    function onKeyDown(e) { if (e.key === 'Escape') clearSelection(); }
-    function onMouseDown(e) {
-      const barEl = headerActionBarRef.current;
-      if (barEl && barEl.contains(e.target)) return;
-      const insideAnySelected = [...selectedMessageIds].some(id => {
-        const el = msgRefs.current[id];
-        return el && el.contains(e.target);
-      });
-      if (!insideAnySelected) clearSelection();
-    }
-    document.addEventListener('keydown', onKeyDown);
-    document.addEventListener('mousedown', onMouseDown);
-    return () => {
-      document.removeEventListener('keydown', onKeyDown);
-      document.removeEventListener('mousedown', onMouseDown);
-    };
-  }, [selectedMessageIds]);
+  // Deliberately no Esc/outside-click auto-clear — the X button in the action bar
+  // is the only way out of selection mode. An outside-click listener here would
+  // (and previously did) misfire on every click meant to ADD another message to
+  // the selection, since a not-yet-selected message row is indistinguishable from
+  // a genuine "outside" click without special-casing the entire message list —
+  // simplest and most correct to just not have one.
 
   // Desktop: close the chevron dropdown on outside click.
   useEffect(() => {
@@ -1052,7 +1035,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
             selected (long-press on mobile, double-click/right-click on desktop, or any
             subsequent tap on another message while selection mode is active). */}
         {selectedMsgs.length > 0 ? (
-          <div ref={headerActionBarRef} className="flex items-center gap-2 px-3 py-3 border-b border-border flex-shrink-0">
+          <div className="flex items-center gap-2 px-3 py-3 border-b border-border flex-shrink-0">
             <button
               onClick={clearSelection}
               className="p-2 rounded-full bg-secondary hover:opacity-75 transition-opacity"
