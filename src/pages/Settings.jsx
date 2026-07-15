@@ -298,13 +298,17 @@ export default function Settings({ currentUser, profile, onProfileUpdate, curren
             <motion.button
               whileTap={{ scale: 0.9 }}
               onClick={() => handleDarkModeChange(!darkMode)}
-              className="relative w-12 h-6 rounded-full transition-all"
-              style={{ background: darkMode ? 'hsl(var(--theme-accent))' : 'hsl(var(--secondary))' }}
+              className="relative w-12 h-6 rounded-full border transition-all"
+              style={{
+                background: darkMode ? 'hsl(var(--theme-accent))' : 'hsl(var(--secondary))',
+                borderColor: darkMode ? 'hsl(var(--theme-accent))' : 'hsl(var(--border))',
+              }}
             >
               <motion.div
                 animate={{ x: darkMode ? 24 : 2 }}
                 transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-                className="absolute top-1 w-4 h-4 bg-white rounded-full shadow"
+                className="absolute top-1 w-4 h-4 bg-white rounded-full shadow-md"
+                style={{ boxShadow: '0 1px 3px hsl(0 0% 0% / 0.4)' }}
               />
             </motion.button>
           </div>
