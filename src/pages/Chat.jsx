@@ -141,6 +141,15 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
   const [sending, setSending] = useState(false);
   const [unreadCounts, setUnreadCounts] = useState({});
   const [lastActivity, setLastActivity] = useState({});
+  // Tracks the same hidden/visible state as the parent's BottomNav (which
+  // onHideNavChange controls) so the composer can move with it — lower and
+  // closer to the screen edge while the nav is hidden, back up just above it
+  // once the nav reappears.
+  const [navHidden, setNavHiddenState] = useState(false);
+  function setNavHidden(hidden) {
+    setNavHiddenState(hidden);
+    onHideNavChange?.(hidden);
+  }
   // Mobile long-press overlay (reaction bar + floating menu)
   const [activeMessageId, setActiveMessageId] = useState(null);
   const [actionRect, setActionRect] = useState(null);
@@ -284,10 +293,10 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
   // handleMessagesScroll) — restored to normal as soon as the conversation closes.
   useEffect(() => {
     if (!selectedPartnership) return;
-    onHideNavChange?.(true);
+    setNavHidden(true);
     return () => {
       clearTimeout(navRevealTimerRef.current);
-      onHideNavChange?.(false);
+      setNavHidden(false);
     };
   }, [selectedPartnership]);
 
@@ -560,9 +569,9 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     lastScrollTopRef.current = scrollTop;
     if (!goingDown) return;
 
-    onHideNavChange?.(false);
+    setNavHidden(false);
     clearTimeout(navRevealTimerRef.current);
-    navRevealTimerRef.current = setTimeout(() => onHideNavChange?.(true), 1500);
+    navRevealTimerRef.current = setTimeout(() => setNavHidden(true), 1500);
   }
 
   function getMsgPermissions(msg) {
@@ -1399,11 +1408,20 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
               </Suspense>
             )}
           </AnimatePresence>
-          {/* BottomNav is h-16 (4rem) plus its own safe-area-inset-bottom padding — match
-              that exactly rather than guessing a flat value, which undershoots on
-              devices with a large inset (notch/home-indicator) and lets BottomNav
-              overlap the send button. */}
-          <div className="flex items-center gap-2 px-4 py-3" style={{ paddingBottom: 'calc(4rem + env(safe-area-inset-bottom, 8px))' }}>
+          {/* Tracks BottomNav's own visibility: parked just above it (BottomNav is h-16
+              plus its own safe-area-inset-bottom padding — matched exactly here rather
+              than guessed, which would undershoot on a large inset/notch/home-indicator
+              and let BottomNav overlap the send button) while it's shown, and settling
+              down near the true screen edge with a little breathing room once it hides. */}
+          <div
+            className="flex items-center gap-2 px-4 py-3"
+            style={{
+              paddingBottom: navHidden
+                ? 'calc(0.75rem + env(safe-area-inset-bottom, 8px))'
+                : 'calc(4rem + env(safe-area-inset-bottom, 8px))',
+              transition: 'padding-bottom 0.25s ease',
+            }}
+          >
             <motion.button
               whileTap={{ scale: 0.85 }}
               onClick={() => setShowPicker(p => !p)}
