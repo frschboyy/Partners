@@ -4,9 +4,46 @@ import { motion, AnimatePresence } from 'framer-motion';
 import Avatar from '@/components/Avatar';
 import PostImage from '@/components/PostImage';
 const ChatPicker = lazy(() => import('@/components/ChatPicker'));
-import { Send, ArrowLeft, Pencil, Trash2, Check, X as XIcon, Smile, Star, CornerUpLeft, Copy, MoreVertical } from 'lucide-react';
+const ReactionEmojiPicker = lazy(() => import('@/components/ReactionEmojiPicker'));
+import { Send, ArrowLeft, Pencil, Trash2, Check, X as XIcon, Smile, Star, CornerUpLeft, Copy, Plus } from 'lucide-react';
 import { haptic } from '@/lib/haptic';
 import { useToast, Toast } from '@/components/Toast';
+
+const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '👏'];
+
+const REACTION_BAR_HEIGHT = 48;
+const REACTION_GAP = 10;
+const MENU_GAP = 8;
+const MENU_ITEM_HEIGHT = 46;
+const HEADER_SAFE_TOP = 76;
+const COMPOSER_SAFE_BOTTOM = 100;
+
+// Positions the floating reaction bar + context menu around a message's measured
+// rect — below the message when there's room, flipping both above it otherwise,
+// always clamped to stay clear of the fixed header/composer and screen edges.
+function getOverlayLayout(rect, itemCount) {
+  if (!rect) return null;
+  const vh = window.innerHeight;
+  const menuHeight = itemCount * MENU_ITEM_HEIGHT + 8;
+
+  const menuTopBelow = rect.bottom + MENU_GAP;
+  const fitsBelow = menuTopBelow + menuHeight <= vh - COMPOSER_SAFE_BOTTOM;
+
+  if (fitsBelow) {
+    return {
+      menuTop: menuTopBelow,
+      reactionTop: Math.max(rect.top - REACTION_GAP - REACTION_BAR_HEIGHT, HEADER_SAFE_TOP),
+      placement: 'below',
+    };
+  }
+
+  const menuTopAbove = Math.max(rect.top - MENU_GAP - menuHeight, HEADER_SAFE_TOP);
+  return {
+    menuTop: menuTopAbove,
+    reactionTop: Math.max(menuTopAbove - REACTION_GAP - REACTION_BAR_HEIGHT, HEADER_SAFE_TOP),
+    placement: 'above',
+  };
+}
 
 function formatTime(dateStr) {
   if (!dateStr) return '';
@@ -30,6 +67,8 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
   const [unreadCounts, setUnreadCounts] = useState({});
   const [lastActivity, setLastActivity] = useState({});
   const [activeMessageId, setActiveMessageId] = useState(null);
+  const [actionRect, setActionRect] = useState(null);
+  const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [savingSticker, setSavingSticker] = useState(null);
   const [stickerSavedMsg, setStickerSavedMsg] = useState(false);
   const [partnerLastReadAt, setPartnerLastReadAt] = useState(null);
@@ -42,10 +81,6 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
   // Sticker preview
   const [stickerPreview, setStickerPreview] = useState(null);
   const [mineFilenames, setMineFilenames] = useState(new Set());
-  // Per-message ⋮ dropdown
-  const [menuMsgId, setMenuMsgId] = useState(null);
-  // Show delete submenu in action bar
-  const [showDeleteMenu, setShowDeleteMenu] = useState(false);
   // Copied feedback
   const [copiedFeedback, setCopiedFeedback] = useState(false);
   const [typingPartners, setTypingPartners] = useState({});
@@ -53,7 +88,6 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
   const { message: toastMessage, variant: toastVariant, show: showToast } = useToast();
   const bottomRef = useRef(null);
   const pickerRef = useRef(null);
-  const menuRef = useRef(null);
   const selectedPartnershipRef = useRef(null);
   const msgRefs = useRef({});
   const typingChannelsRef = useRef({});
@@ -319,18 +353,42 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     msgRefs.current[msgId]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
+  function getMsgPermissions(msg) {
+    if (!msg) return {};
+    const isMe = msg.sender_id === currentUser.id;
+    const ageMs = Date.now() - new Date(msg.created_at).getTime();
+    const canEdit = isMe && !msg.is_deleted && msg.message_type === 'text' && ageMs < 5 * 60 * 1000;
+    const canDeleteAll = isMe && !msg.is_deleted && ageMs < 30 * 60 * 1000;
+    const canSaveSticker = !isMe && msg.message_type === 'sticker' && !msg.is_deleted;
+    const canReply = !msg.is_deleted && msg.message_type !== 'system';
+    const canCopy = !msg.is_deleted && msg.message_type === 'text';
+    const canAct = canReply || canEdit || canDeleteAll || canSaveSticker;
+    return { isMe, canEdit, canDeleteAll, canSaveSticker, canReply, canCopy, canAct };
+  }
+
+  function openActionOverlay(msgId) {
+    const el = msgRefs.current[msgId];
+    if (el) setActionRect(el.getBoundingClientRect());
+    setActiveMessageId(msgId);
+    haptic([30, 15, 50]);
+  }
+
+  function closeActionOverlay() {
+    setActiveMessageId(null);
+    setActionRect(null);
+    setShowReactionPicker(false);
+  }
+
   async function copyMessage(msg) {
     try { await navigator.clipboard.writeText(msg.content || ''); } catch {}
-    setActiveMessageId(null);
-    setMenuMsgId(null);
+    closeActionOverlay();
     setCopiedFeedback(true);
     setTimeout(() => setCopiedFeedback(false), 1800);
   }
 
   function deleteForMe(msg) {
-    setActiveMessageId(null);
-    setMenuMsgId(null);
     setHiddenMsgIds(prev => new Set([...prev, msg.id]));
+    closeActionOverlay();
   }
 
   async function addStickerToMineWeb(url) {
@@ -388,28 +446,35 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
   }
 
   async function deleteMessage(msg) {
-    setActiveMessageId(null);
+    closeActionOverlay();
     await api.entities.ChatMessage.update(msg.id, { is_deleted: true });
   }
 
-  async function saveStickerToMine(stickerUrl) {
-    setSavingSticker(stickerUrl);
-    try {
-      const marker = '/object/public/uploads/';
-      const idx = stickerUrl.indexOf(marker);
-      if (idx === -1) throw new Error('Cannot save this sticker');
-      const sourcePath = stickerUrl.slice(idx + marker.length);
-      const filename = sourcePath.split('/').pop();
-      const destPath = `stickers/${currentUser.id}/${Date.now()}_${filename}`;
-      const { error } = await supabase.storage.from('uploads').copy(sourcePath, destPath);
-      if (error) throw error;
-      setActiveMessageId(null);
-      setStickerSavedMsg(true);
-      setTimeout(() => setStickerSavedMsg(false), 2500);
-    } catch (err) {
-      console.error('Failed to save sticker:', err);
+  async function toggleMessageReaction(msg, emoji) {
+    const base = msg.reactions || [];
+    const existing = base.find(r => r.user_id === currentUser.id);
+    let updated;
+    if (existing) {
+      updated = existing.emoji === emoji
+        ? base.filter(r => r.user_id !== currentUser.id)
+        : base.map(r => r.user_id === currentUser.id ? { ...r, emoji } : r);
+    } else {
+      updated = [...base, { user_id: currentUser.id, emoji, created_at: new Date().toISOString() }];
     }
-    setSavingSticker(null);
+    // Optimistic so it feels instant even before the realtime echo arrives
+    setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, reactions: updated } : m));
+    closeActionOverlay();
+    try {
+      const { error } = await supabase.rpc('set_chat_message_reactions', {
+        p_message_id: msg.id,
+        p_reactions: updated,
+      });
+      if (error) throw error;
+    } catch (err) {
+      console.error('Failed to update reaction:', err);
+      setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, reactions: base } : m));
+      showToast('Failed to react — please try again', 'error');
+    }
   }
 
   const handleMsgPointerDown = useCallback((msgId, canAct) => {
@@ -417,18 +482,12 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     longPressActivated.current = false;
     longPressTimer.current = setTimeout(() => {
       longPressActivated.current = true;
-      setActiveMessageId(prev => prev === msgId ? null : msgId);
-      haptic([30, 15, 50]);
+      openActionOverlay(msgId);
     }, 480);
   }, []);
 
   const handleMsgPointerUp = useCallback(() => {
     clearTimeout(longPressTimer.current);
-  }, []);
-
-  const handleMsgClick = useCallback((msgId, canAct) => {
-    if (longPressActivated.current) { longPressActivated.current = false; return; }
-    if (canAct) setActiveMessageId(prev => prev === msgId ? null : msgId);
   }, []);
 
   useEffect(() => {
@@ -441,18 +500,6 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     document.addEventListener('mousedown', onMouseDown);
     return () => document.removeEventListener('mousedown', onMouseDown);
   }, [showPicker]);
-
-  // Close ⋮ dropdown when clicking elsewhere
-  useEffect(() => {
-    if (!menuMsgId) return;
-    function onMouseDown(e) {
-      if (menuRef.current && !menuRef.current.contains(e.target)) {
-        setMenuMsgId(null);
-      }
-    }
-    document.addEventListener('mousedown', onMouseDown);
-    return () => document.removeEventListener('mousedown', onMouseDown);
-  }, [menuMsgId]);
 
   async function sendMedia(previewUrl, fullUrl, type) {
     if (!selectedPartnership) return;
@@ -521,6 +568,19 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
       : selectedPartnership.user_a_name;
     const partnerProfile = partnerProfiles[partnerId];
 
+    const activeMsg = activeMessageId ? messages.find(m => m.id === activeMessageId) : null;
+    const activePerms = activeMsg ? getMsgPermissions(activeMsg) : null;
+    const activeMenuItems = activeMsg ? [
+      activePerms.canReply && 'reply',
+      activePerms.canCopy && 'copy',
+      activePerms.canSaveSticker && 'save',
+      activePerms.canEdit && 'edit',
+      activePerms.canDeleteAll && 'deleteAll',
+      'deleteMe',
+    ].filter(Boolean) : [];
+    const overlayLayout = activeMsg && actionRect ? getOverlayLayout(actionRect, activeMenuItems.length) : null;
+    const overlaySide = activePerms?.isMe ? { right: 16 } : { left: 16 };
+
     return (
       <div className="flex flex-col h-full bg-background" data-no-swipe-nav>
         <Toast message={toastMessage} variant={toastVariant} />
@@ -576,83 +636,109 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
           )}
         </AnimatePresence>
 
-        {/* Header — replaced by action bar when activeMessageId is set */}
-        {activeMessageId && !editingMessageId ? (() => {
-          const sm = messages.find(m => m.id === activeMessageId);
-          if (!sm) return null;
-          const smIsMe = sm.sender_id === currentUser.id;
-          const smAge = Date.now() - new Date(sm.created_at).getTime();
-          const smCanEdit = smIsMe && !sm.is_deleted && sm.message_type === 'text' && smAge < 5 * 60 * 1000;
-          const smCanDelAll = smIsMe && !sm.is_deleted && smAge < 30 * 60 * 1000;
-          const smCanReply = !sm.is_deleted && sm.message_type !== 'system';
-          const smCanCopy = !sm.is_deleted && sm.message_type === 'text';
-          return (
-            <div className="flex items-center gap-2 px-3 py-3 border-b border-border flex-shrink-0">
-              <button
-                onClick={() => { setActiveMessageId(null); setShowDeleteMenu(false); }}
-                className="p-2 rounded-full bg-secondary hover:opacity-75 transition-opacity"
+        {/* Message action overlay: dim/blur backdrop + floating reaction bar + context menu */}
+        <AnimatePresence>
+          {activeMsg && !editingMessageId && overlayLayout && (
+            <React.Fragment key="action-overlay">
+              <motion.div
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                className="fixed inset-0 z-40"
+                style={{ background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(2px)', WebkitBackdropFilter: 'blur(2px)' }}
+                onClick={closeActionOverlay}
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.85, y: overlayLayout.placement === 'below' ? 6 : -6 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.85, y: overlayLayout.placement === 'below' ? 6 : -6 }}
+                transition={{ type: 'spring', damping: 22, stiffness: 420 }}
+                className="fixed z-50 flex items-center gap-0.5 px-2 py-1.5 rounded-full shadow-2xl"
+                style={{ top: overlayLayout.reactionTop, ...overlaySide, background: 'hsl(var(--popover))' }}
               >
-                <XIcon size={17} />
-              </button>
-              <span className="flex-1 text-sm font-semibold text-foreground ml-1">1 selected</span>
-              {smCanReply && (
-                <button onClick={() => { setReplyingTo(sm); setActiveMessageId(null); }}
-                  className="p-2.5 rounded-full bg-secondary hover:opacity-75 transition-opacity" title="Reply">
-                  <CornerUpLeft size={16} />
-                </button>
-              )}
-              {smCanCopy && (
-                <button onClick={() => copyMessage(sm)}
-                  className="p-2.5 rounded-full bg-secondary hover:opacity-75 transition-opacity" title="Copy">
-                  <Copy size={16} />
-                </button>
-              )}
-              {smCanEdit && (
-                <button onClick={() => { setEditText(sm.content); setEditingMessageId(sm.id); setActiveMessageId(null); }}
-                  className="p-2.5 rounded-full bg-secondary hover:opacity-75 transition-opacity" title="Edit">
-                  <Pencil size={16} />
-                </button>
-              )}
-              {!showDeleteMenu ? (
-                <button onClick={() => setShowDeleteMenu(true)}
-                  className="p-2.5 rounded-full bg-secondary hover:opacity-75 transition-opacity" title="Delete"
-                  style={{ color: 'hsl(var(--destructive))' }}>
-                  <Trash2 size={16} />
-                </button>
-              ) : (
-                <div className="flex gap-1.5">
-                  {smCanDelAll && (
-                    <button
-                      onClick={async () => { const m = sm; setActiveMessageId(null); setShowDeleteMenu(false); await deleteMessage(m); }}
-                      className="text-[11px] font-semibold px-2.5 py-1.5 rounded-full transition-opacity hover:opacity-80"
-                      style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444' }}
-                    >For All</button>
-                  )}
+                {REACTION_EMOJIS.map(emoji => (
                   <button
-                    onClick={() => deleteForMe(sm)}
-                    className="text-[11px] font-semibold px-2.5 py-1.5 rounded-full transition-opacity hover:opacity-80"
-                    style={{ background: 'rgba(239,68,68,0.08)', color: '#ef4444' }}
-                  >For Me</button>
-                </div>
+                    key={emoji}
+                    onClick={() => toggleMessageReaction(activeMsg, emoji)}
+                    className="w-8 h-8 flex items-center justify-center text-lg rounded-full hover:bg-secondary transition-transform active:scale-90"
+                  >
+                    {emoji}
+                  </button>
+                ))}
+                <button
+                  onClick={() => setShowReactionPicker(true)}
+                  className="w-8 h-8 flex items-center justify-center rounded-full bg-secondary text-muted-foreground hover:opacity-80 transition-opacity flex-shrink-0"
+                >
+                  <Plus size={15} />
+                </button>
+              </motion.div>
+              <motion.div
+                initial={{ opacity: 0, scale: 0.92 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.92 }}
+                transition={{ type: 'spring', damping: 26, stiffness: 440 }}
+                className="fixed z-50 flex flex-col min-w-[200px] rounded-2xl border border-border shadow-2xl overflow-hidden"
+                style={{ top: overlayLayout.menuTop, ...overlaySide, background: 'hsl(var(--popover))' }}
+              >
+                {activePerms.canReply && (
+                  <button onClick={() => { setReplyingTo(activeMsg); closeActionOverlay(); }}
+                    className="flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-secondary transition-colors text-left">
+                    Reply <CornerUpLeft size={15} />
+                  </button>
+                )}
+                {activePerms.canCopy && (
+                  <button onClick={() => copyMessage(activeMsg)}
+                    className="flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-secondary transition-colors text-left border-t border-border">
+                    Copy <Copy size={15} />
+                  </button>
+                )}
+                {activePerms.canSaveSticker && (
+                  <button onClick={() => { setStickerPreview(activeMsg); closeActionOverlay(); }}
+                    className="flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-secondary transition-colors text-left border-t border-border"
+                    style={{ color: '#ca8a04' }}>
+                    Save to Mine <Star size={15} />
+                  </button>
+                )}
+                {activePerms.canEdit && (
+                  <button onClick={() => { setEditText(activeMsg.content); setEditingMessageId(activeMsg.id); closeActionOverlay(); }}
+                    className="flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-secondary transition-colors text-left border-t border-border">
+                    Edit <Pencil size={15} />
+                  </button>
+                )}
+                {activePerms.canDeleteAll && (
+                  <button onClick={() => deleteMessage(activeMsg)}
+                    className="flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-secondary transition-colors text-left border-t border-border text-destructive">
+                    Delete for All <Trash2 size={15} />
+                  </button>
+                )}
+                <button onClick={() => deleteForMe(activeMsg)}
+                  className="flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-secondary transition-colors text-left border-t border-border text-destructive">
+                  Delete for Me <Trash2 size={15} />
+                </button>
+              </motion.div>
+              {showReactionPicker && (
+                <Suspense fallback={null}>
+                  <ReactionEmojiPicker onSelect={emoji => toggleMessageReaction(activeMsg, emoji)} />
+                </Suspense>
               )}
-            </div>
-          );
-        })() : (
-          <div className="flex items-center gap-3 px-4 py-3 border-b border-border flex-shrink-0">
-            <motion.button
-              whileTap={{ scale: 0.85, opacity: 0.7 }}
-              onClick={() => setSelectedPartnership(null)}
-              className="p-2.5 rounded-full bg-secondary"
-            >
-              <ArrowLeft size={18} />
-            </motion.button>
-            <Avatar profile={partnerProfile} size="sm" noAutoFlip />
-            <div>
-              <p className="font-bold">{partnerName}</p>
-              <p className="text-xs text-muted-foreground">Accountability partner</p>
-            </div>
+            </React.Fragment>
+          )}
+        </AnimatePresence>
+
+        {/* Header — always visible */}
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-border flex-shrink-0">
+          <motion.button
+            whileTap={{ scale: 0.85, opacity: 0.7 }}
+            onClick={() => setSelectedPartnership(null)}
+            className="p-2.5 rounded-full bg-secondary"
+          >
+            <ArrowLeft size={18} />
+          </motion.button>
+          <Avatar profile={partnerProfile} size="sm" noAutoFlip />
+          <div>
+            <p className="font-bold">{partnerName}</p>
+            <p className="text-xs text-muted-foreground">Accountability partner</p>
           </div>
-        )}
+        </div>
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -684,16 +770,14 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
             </div>
           ) : null}
           {messages.filter(msg => !hiddenMsgIds.has(msg.id)).map(msg => {
-            const isMe = msg.sender_id === currentUser.id;
-            const ageMs = Date.now() - new Date(msg.created_at).getTime();
-            const canEdit = isMe && !msg.is_deleted && msg.message_type === 'text' && ageMs < 5 * 60 * 1000;
-            const canDelete = isMe && !msg.is_deleted && msg.message_type !== 'system' && ageMs < 30 * 60 * 1000;
-            const canSaveSticker = !isMe && (msg.message_type === 'sticker') && !msg.is_deleted;
-            const canAct = canEdit || canDelete || canSaveSticker || (!msg.is_deleted && msg.message_type !== 'system');
-            const showMenu = menuMsgId === msg.id;
+            const { isMe, canEdit, canDeleteAll, canSaveSticker, canAct } = getMsgPermissions(msg);
             const isEditing = editingMessageId === msg.id;
+            const isActive = activeMessageId === msg.id;
             const isRead = isMe && !!partnerLastReadAt && new Date(msg.created_at) <= new Date(partnerLastReadAt);
             const replyTo = msg.reply_to_id ? messages.find(m => m.id === msg.reply_to_id) : null;
+            const reactionGroups = {};
+            (msg.reactions || []).forEach(r => { reactionGroups[r.emoji] = (reactionGroups[r.emoji] || 0) + 1; });
+            const reactionEntries = Object.entries(reactionGroups);
 
             return (
               <motion.div
@@ -701,9 +785,12 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                 ref={el => { msgRefs.current[msg.id] = el; }}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group`}
-                style={activeMessageId === msg.id ? { background: 'hsl(var(--theme-accent) / 0.06)', borderRadius: 12, margin: '0 -8px', padding: '2px 8px' } : {}}
-                onContextMenu={e => { e.preventDefault(); if (canAct) { setActiveMessageId(msg.id); setShowDeleteMenu(false); } }}
+                className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} relative`}
+                style={isActive ? { zIndex: 55 } : {}}
+                onPointerDown={() => handleMsgPointerDown(msg.id, canAct)}
+                onPointerUp={handleMsgPointerUp}
+                onPointerCancel={handleMsgPointerUp}
+                onContextMenu={e => { e.preventDefault(); if (canAct) openActionOverlay(msg.id); }}
               >
                 {/* Reply-to reference */}
                 {replyTo && !hiddenMsgIds.has(replyTo.id) && (
@@ -724,14 +811,14 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                 {/* Sticker / GIF */}
                 {(msg.message_type === 'gif' || msg.message_type === 'sticker') && !msg.is_deleted ? (
                   <>
-                    <div
+                    <motion.div
                       className={`relative max-w-[220px] rounded-2xl overflow-hidden ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
-                      style={{ cursor: 'pointer', userSelect: 'none' }}
-                      onPointerDown={() => handleMsgPointerDown(msg.id, canAct)}
-                      onPointerUp={handleMsgPointerUp}
-                      onPointerCancel={handleMsgPointerUp}
+                      style={{ cursor: 'pointer', userSelect: 'none', boxShadow: isActive ? '0 8px 24px rgba(0,0,0,0.35)' : 'none' }}
+                      animate={{ scale: isActive ? 1.04 : 1 }}
+                      transition={{ type: 'spring', damping: 20, stiffness: 400 }}
                       onClick={() => {
                         if (longPressActivated.current) { longPressActivated.current = false; return; }
+                        if (isActive) { closeActionOverlay(); return; }
                         setStickerPreview(msg);
                       }}
                     >
@@ -742,16 +829,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                         style={{ maxHeight: msg.message_type === 'sticker' ? 120 : 160, objectFit: 'cover', display: 'block' }}
                         loading="lazy"
                       />
-                      {/* ⋮ button */}
-                      {canAct && (
-                        <button
-                          onClick={e => { e.stopPropagation(); setMenuMsgId(prev => prev === msg.id ? null : msg.id); }}
-                          className="absolute top-1 right-1 p-0.5 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/60"
-                        >
-                          <MoreVertical size={13} color="white" />
-                        </button>
-                      )}
-                    </div>
+                    </motion.div>
                     {isMe && (
                       <div className="flex items-center justify-end gap-0.5 mt-0.5 px-0.5">
                         <Check size={9} strokeWidth={3} style={{ color: 'hsl(var(--muted-foreground))', opacity: isRead ? 0.85 : 0.4 }} />
@@ -761,29 +839,19 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                   </>
                 ) : (
                   /* Text / system bubble */
-                  <div
+                  <motion.div
                     className={`relative max-w-[78%] px-3.5 py-2.5 rounded-2xl ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
                     style={{
                       background: isMe ? 'hsl(var(--theme-accent))' : 'hsl(var(--secondary))',
                       color: isMe ? 'hsl(var(--theme-accent-fg))' : 'hsl(var(--foreground))',
                       cursor: canAct ? 'pointer' : 'default',
                       userSelect: 'none',
+                      boxShadow: isActive ? '0 8px 24px rgba(0,0,0,0.35)' : 'none',
                     }}
-                    onPointerDown={() => handleMsgPointerDown(msg.id, canAct)}
-                    onPointerUp={handleMsgPointerUp}
-                    onPointerCancel={handleMsgPointerUp}
-                    onClick={() => handleMsgClick(msg.id, canAct)}
+                    animate={{ scale: isActive ? 1.04 : 1 }}
+                    transition={{ type: 'spring', damping: 20, stiffness: 400 }}
+                    onClick={() => { if (isActive) closeActionOverlay(); }}
                   >
-                    {/* ⋮ dropdown trigger */}
-                    {canAct && !msg.is_deleted && msg.message_type !== 'system' && (
-                      <button
-                        onClick={e => { e.stopPropagation(); setMenuMsgId(prev => prev === msg.id ? null : msg.id); }}
-                        className={`absolute top-1.5 ${isMe ? 'left-1.5' : 'right-1.5'} p-0.5 rounded-full opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity`}
-                        style={{ color: isMe ? 'hsl(var(--theme-accent-fg))' : 'hsl(var(--foreground))' }}
-                      >
-                        <MoreVertical size={13} />
-                      </button>
-                    )}
                     {msg.is_deleted ? (
                       <p className="text-xs italic opacity-50">Message deleted</p>
                     ) : msg.message_type === 'system' ? (
@@ -824,64 +892,20 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                         </div>
                       </>
                     )}
-                  </div>
+                  </motion.div>
                 )}
 
-                {/* ⋮ context dropdown menu */}
-                {showMenu && (
+                {/* Reaction summary */}
+                {reactionEntries.length > 0 && (
                   <div
-                    ref={menuRef}
-                    className={`flex flex-col gap-0.5 mt-1 min-w-[140px] rounded-xl border border-border shadow-lg overflow-hidden z-20`}
-                    style={{ background: 'hsl(var(--popover))' }}
-                    onClick={e => e.stopPropagation()}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-full mt-1 text-xs shadow"
+                    style={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))' }}
                   >
-                    {!msg.is_deleted && msg.message_type !== 'system' && (
-                      <button
-                        onClick={() => { setReplyingTo(msg); setMenuMsgId(null); }}
-                        className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary transition-colors text-left"
-                      >
-                        <CornerUpLeft size={13} /> Reply
-                      </button>
-                    )}
-                    {!msg.is_deleted && msg.message_type === 'text' && (
-                      <button
-                        onClick={() => copyMessage(msg)}
-                        className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary transition-colors text-left"
-                      >
-                        <Copy size={13} /> Copy
-                      </button>
-                    )}
-                    {canSaveSticker && (
-                      <button
-                        onClick={() => { setStickerPreview(msg); setMenuMsgId(null); }}
-                        className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary transition-colors text-left"
-                        style={{ color: '#ca8a04' }}
-                      >
-                        <Star size={13} /> Save to Mine
-                      </button>
-                    )}
-                    {canEdit && (
-                      <button
-                        onClick={() => { setEditText(msg.content); setEditingMessageId(msg.id); setMenuMsgId(null); }}
-                        className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary transition-colors text-left"
-                      >
-                        <Pencil size={13} /> Edit
-                      </button>
-                    )}
-                    {canDelete && (
-                      <button
-                        onClick={() => { deleteMessage(msg); setMenuMsgId(null); }}
-                        className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary transition-colors text-left text-destructive"
-                      >
-                        <Trash2 size={13} /> Delete for All
-                      </button>
-                    )}
-                    <button
-                      onClick={() => deleteForMe(msg)}
-                      className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary transition-colors text-left text-destructive"
-                    >
-                      <Trash2 size={13} /> Delete for Me
-                    </button>
+                    {reactionEntries.map(([emoji, count]) => (
+                      <span key={emoji} className="flex items-center gap-0.5">
+                        {emoji}{count > 1 && <span className="text-[10px] text-muted-foreground">{count}</span>}
+                      </span>
+                    ))}
                   </div>
                 )}
               </motion.div>
