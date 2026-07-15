@@ -5,7 +5,7 @@ import Avatar from '@/components/Avatar';
 import PostImage from '@/components/PostImage';
 const ChatPicker = lazy(() => import('@/components/ChatPicker'));
 const ReactionEmojiPicker = lazy(() => import('@/components/ReactionEmojiPicker'));
-import { Send, ArrowLeft, Pencil, Trash2, Check, X as XIcon, Smile, Star, CornerUpLeft, Copy, Plus, ChevronDown, ImageOff } from 'lucide-react';
+import { Send, ArrowLeft, Pencil, Trash2, Check, X as XIcon, Smile, Star, CornerUpLeft, Copy, Plus, ChevronDown, ImageOff, MoreVertical, CheckSquare } from 'lucide-react';
 import { haptic } from '@/lib/haptic';
 import { useToast, Toast } from '@/components/Toast';
 
@@ -60,14 +60,39 @@ function ChatMediaBubble({ src, alt, maxHeight, isExternal }) {
 const REACTION_BAR_HEIGHT = 48;
 const REACTION_GAP = 10;
 const HEADER_SAFE_TOP = 76;
+const MENU_GAP = 8;
+const MENU_ITEM_HEIGHT = 44;
+const COMPOSER_SAFE_BOTTOM = 90;
 const SWIPE_REPLY_THRESHOLD = 60;
 const SWIPE_REPLY_MAX = 72;
 
-// Positions the floating reaction bar above a message's measured rect, clamped so
-// it never sits behind the fixed header.
-function getReactionBarTop(rect) {
+// Positions the long-press quick-action overlay (reaction bar above the message,
+// action menu below) relative to the message's measured rect. Prefers reaction
+// bar above / menu below; if the menu wouldn't fit before the composer, flips to
+// stack both above the message instead — so it always stays fully on-screen.
+function getOverlayLayout(rect, itemCount) {
   if (!rect) return null;
-  return Math.max(rect.top - REACTION_GAP - REACTION_BAR_HEIGHT, HEADER_SAFE_TOP);
+  const menuHeight = itemCount * MENU_ITEM_HEIGHT;
+  const viewportH = window.innerHeight;
+  const spaceBelow = viewportH - rect.bottom - COMPOSER_SAFE_BOTTOM;
+  const spaceAbove = rect.top - HEADER_SAFE_TOP;
+
+  if (spaceBelow >= menuHeight + REACTION_GAP) {
+    return {
+      reactionTop: Math.max(rect.top - REACTION_GAP - REACTION_BAR_HEIGHT, HEADER_SAFE_TOP),
+      menuTop: rect.bottom + MENU_GAP,
+    };
+  }
+  if (spaceAbove >= menuHeight + REACTION_BAR_HEIGHT + REACTION_GAP * 2) {
+    return {
+      reactionTop: rect.top - REACTION_GAP - REACTION_BAR_HEIGHT,
+      menuTop: rect.top - REACTION_GAP * 2 - REACTION_BAR_HEIGHT - menuHeight,
+    };
+  }
+  return {
+    reactionTop: HEADER_SAFE_TOP,
+    menuTop: HEADER_SAFE_TOP + REACTION_BAR_HEIGHT + REACTION_GAP,
+  };
 }
 
 function formatTime(dateStr) {
@@ -127,15 +152,20 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     setNavHiddenState(hidden);
     onHideNavChange?.(hidden);
   }
-  // Unified message selection — the single source of truth behind long-press
-  // (mobile), double-click/right-click (desktop), and every subsequent tap once
-  // selection mode is active. Drives the header action bar and (when exactly one
-  // message is selected) the floating reaction bar.
+  // Persistent multi-select mode — WhatsApp/Telegram-style: entered via the
+  // "Select" action (see below), then every subsequent tap toggles a message.
+  // Drives the header action bar (no backdrop, no reaction bar).
   const [selectedMessageIds, setSelectedMessageIds] = useState(() => new Set());
-  const [selectionAnchorRect, setSelectionAnchorRect] = useState(null);
+  const [showSelectionMenu, setShowSelectionMenu] = useState(false);
+  // Transient single-message quick-action overlay — long-press (mobile) or
+  // right-click (desktop) on a message while NOT already in selection mode.
+  // Dim/blurred backdrop + floating reaction bar + floating action menu for
+  // that one message, exactly like iMessage/WhatsApp's long-press popup.
+  const [activeMessageId, setActiveMessageId] = useState(null);
+  const [actionRect, setActionRect] = useState(null);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   // Desktop-only: small anchored dropdown for a quick single-message action,
-  // independent of the selection system above.
+  // independent of the systems above.
   const [chevronMenuMsgId, setChevronMenuMsgId] = useState(null);
   const [savingSticker, setSavingSticker] = useState(null);
   const [stickerSavedMsg, setStickerSavedMsg] = useState(false);
@@ -157,6 +187,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
   const bottomRef = useRef(null);
   const pickerRef = useRef(null);
   const chevronMenuRef = useRef(null);
+  const selectionMenuRef = useRef(null);
   const selectedPartnershipRef = useRef(null);
   const msgRefs = useRef({});
   const replyIconRefs = useRef({});
@@ -387,22 +418,12 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     if (current?.is_deleted) setReplyingTo(null);
   }, [messages, replyingTo]);
 
-  // Recomputes the floating reaction bar's anchor whenever the selection narrows
-  // to (or starts at, or is reduced back down to) exactly one message — cleared
-  // the moment it's anything other than exactly one.
-  useEffect(() => {
-    if (selectedMessageIds.size !== 1) { setSelectionAnchorRect(null); return; }
-    const soleId = [...selectedMessageIds][0];
-    const el = msgRefs.current[soleId];
-    if (el) setSelectionAnchorRect(el.getBoundingClientRect());
-  }, [selectedMessageIds]);
-
-  // Deliberately no Esc/outside-click auto-clear — the X button in the action bar
-  // is the only way out of selection mode. An outside-click listener here would
-  // (and previously did) misfire on every click meant to ADD another message to
-  // the selection, since a not-yet-selected message row is indistinguishable from
-  // a genuine "outside" click without special-casing the entire message list —
-  // simplest and most correct to just not have one.
+  // Deliberately no Esc/outside-click auto-clear for selection MODE itself — the
+  // X button in the action bar is the only way out. An outside-click listener
+  // here would (and previously did) misfire on every click meant to ADD another
+  // message to the selection, since a not-yet-selected message row is
+  // indistinguishable from a genuine "outside" click without special-casing the
+  // entire message list — simplest and most correct to just not have one.
 
   // Desktop: close the chevron dropdown on outside click.
   useEffect(() => {
@@ -415,6 +436,19 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     document.addEventListener('mousedown', onMouseDown);
     return () => document.removeEventListener('mousedown', onMouseDown);
   }, [chevronMenuMsgId]);
+
+  // The selection header's own "⋮" dropdown (unlike selection mode itself) is a
+  // transient popup, not a mode — outside-click-to-close is the right behavior here.
+  useEffect(() => {
+    if (!showSelectionMenu) return;
+    function onMouseDown(e) {
+      if (selectionMenuRef.current && !selectionMenuRef.current.contains(e.target)) {
+        setShowSelectionMenu(false);
+      }
+    }
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
+  }, [showSelectionMenu]);
 
   async function loadPartnerships() {
     setLoadingPartnerships(true);
@@ -577,8 +611,10 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     return { isMe, canEdit, canDeleteAll, canSaveSticker, canReply, canCopy, canAct };
   }
 
-  // Quick single-message action list — used only by the desktop chevron dropdown,
-  // which is independent of the selection system (a one-off action, not a mode).
+  // Quick single-message action list — shared by the desktop chevron dropdown
+  // and the long-press/right-click quick-action overlay below. Both are one-off
+  // actions on a single message, not a mode — "Select" is the bridge into the
+  // persistent multi-select mode further down.
   function getMessageMenuActions(msg, perms, closeUI) {
     const actions = [];
     if (perms.canReply) {
@@ -597,6 +633,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
       actions.push({ key: 'deleteAll', label: 'Delete for All', icon: Trash2, destructive: true, onClick: () => { deleteMessage(msg); closeUI(); } });
     }
     actions.push({ key: 'deleteMe', label: 'Delete for Me', icon: Trash2, destructive: true, onClick: () => { deleteForMe(msg); closeUI(); } });
+    actions.push({ key: 'select', label: 'Select', icon: CheckSquare, onClick: () => { closeUI(); toggleMessageSelection(msg.id); } });
     return actions;
   }
 
@@ -656,6 +693,8 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     });
   }
 
+  // Desktop double-click: goes straight into persistent multi-select mode
+  // (distinct from long-press/right-click, which open the quick-action overlay).
   function enterSelection(msgId) {
     setChevronMenuMsgId(null);
     toggleMessageSelection(msgId);
@@ -664,6 +703,24 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
 
   function clearSelection() {
     setSelectedMessageIds(new Set());
+    setShowSelectionMenu(false);
+  }
+
+  // Long-press (mobile) / right-click (desktop) on a message while NOT already
+  // selecting — opens the transient single-message overlay (backdrop + reaction
+  // bar + action menu), measuring its rect up front so the overlay can position
+  // itself without waiting on a layout effect.
+  function openActionOverlay(msgId) {
+    const el = msgRefs.current[msgId];
+    if (el) setActionRect(el.getBoundingClientRect());
+    setActiveMessageId(msgId);
+    setChevronMenuMsgId(null);
+    haptic([30, 15, 50]);
+  }
+
+  function closeActionOverlay() {
+    setActiveMessageId(null);
+    setActionRect(null);
     setShowReactionPicker(false);
   }
 
@@ -791,7 +848,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     }
     // Optimistic so it feels instant even before the realtime echo arrives
     setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, reactions: updated } : m));
-    clearSelection();
+    closeActionOverlay();
     try {
       const { error } = await supabase.rpc('set_chat_message_reactions', {
         p_message_id: msg.id,
@@ -805,12 +862,21 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     }
   }
 
-  const handleMsgPointerDown = useCallback((msgId, canAct) => {
+  // While NOT already in selection mode, a completed long-press opens the
+  // single-message quick-action overlay (backdrop + reaction bar + menu). If
+  // selection mode IS already active, a long-press just toggles this message
+  // like any other tap would — the overlay is only ever for a lone message.
+  const handleMsgPointerDown = useCallback((msgId, canAct, selectionActive) => {
     if (!canAct) return;
     longPressActivated.current = false;
     longPressTimer.current = setTimeout(() => {
       longPressActivated.current = true;
-      enterSelection(msgId);
+      if (selectionActive) {
+        toggleMessageSelection(msgId);
+        haptic([30, 15, 50]);
+      } else {
+        openActionOverlay(msgId);
+      }
     }, 480);
   }, []);
 
@@ -935,9 +1001,14 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     const partnerProfile = partnerProfiles[partnerId];
 
     const selectedMsgs = messages.filter(m => selectedMessageIds.has(m.id));
-    const selectionAnchorMsg = selectedMsgs.length === 1 ? selectedMsgs[0] : null;
-    const selectionAnchorSide = selectionAnchorMsg && getMsgPermissions(selectionAnchorMsg).isMe ? { right: 16 } : { left: 16 };
-    const reactionBarTop = selectionAnchorMsg ? getReactionBarTop(selectionAnchorRect) : null;
+
+    // Transient quick-action overlay target (long-press/right-click), separate
+    // from the persistent multi-select above — the two are mutually exclusive.
+    const activeMsg = activeMessageId ? messages.find(m => m.id === activeMessageId) : null;
+    const activeMsgPerms = activeMsg ? getMsgPermissions(activeMsg) : null;
+    const activeMsgActions = activeMsg ? getMessageMenuActions(activeMsg, activeMsgPerms, closeActionOverlay) : [];
+    const activeMsgSide = activeMsg?.sender_id === currentUser.id ? { right: 16 } : { left: 16 };
+    const overlayLayout = activeMsg ? getOverlayLayout(actionRect, activeMsgActions.length) : null;
 
     return (
       <div className="flex flex-col h-full bg-background" data-no-swipe-nav>
@@ -994,23 +1065,37 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
           )}
         </AnimatePresence>
 
-        {/* Floating reaction bar — shown whenever exactly one message is selected,
-            regardless of whether selection started via long-press or double-click. */}
+        {/* Quick-action overlay — long-press (mobile) or right-click (desktop) on a
+            single message while not already in selection mode: dim/blurred backdrop,
+            floating reaction bar above the message, floating action menu (with a
+            "Select" item that bridges into persistent multi-select). Tap the backdrop
+            or the message itself to dismiss. */}
         <AnimatePresence>
-          {selectionAnchorMsg && !editingMessageId && !selectionAnchorMsg.is_deleted && reactionBarTop != null && (
+          {activeMsg && overlayLayout && (
             <motion.div
-              key="reaction-bar"
+              key="action-backdrop"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50"
+              style={{ background: 'rgba(0,0,0,0.35)', backdropFilter: 'blur(2px)', WebkitBackdropFilter: 'blur(2px)' }}
+              onClick={closeActionOverlay}
+            />
+          )}
+        </AnimatePresence>
+        <AnimatePresence>
+          {activeMsg && overlayLayout && !activeMsg.is_deleted && (
+            <motion.div
+              key="action-reaction-bar"
               initial={{ opacity: 0, scale: 0.85, y: 6 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.85, y: 6 }}
               transition={{ type: 'spring', damping: 22, stiffness: 420 }}
-              className="fixed z-50 flex items-center gap-0.5 px-2 py-1.5 rounded-full shadow-2xl"
-              style={{ top: reactionBarTop, ...selectionAnchorSide, background: 'hsl(var(--popover))' }}
+              className="fixed z-[56] flex items-center gap-0.5 px-2 py-1.5 rounded-full shadow-2xl"
+              style={{ top: overlayLayout.reactionTop, ...activeMsgSide, background: 'hsl(var(--popover))' }}
             >
               {REACTION_EMOJIS.map(emoji => (
                 <button
                   key={emoji}
-                  onClick={() => toggleMessageReaction(selectionAnchorMsg, emoji)}
+                  onClick={() => toggleMessageReaction(activeMsg, emoji)}
                   className="w-8 h-8 flex items-center justify-center text-lg rounded-full hover:bg-secondary transition-transform active:scale-90"
                 >
                   {emoji}
@@ -1025,11 +1110,35 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
             </motion.div>
           )}
         </AnimatePresence>
-        {showReactionPicker && selectionAnchorMsg && (
+        {showReactionPicker && activeMsg && (
           <Suspense fallback={null}>
-            <ReactionEmojiPicker onSelect={emoji => toggleMessageReaction(selectionAnchorMsg, emoji)} />
+            <ReactionEmojiPicker onSelect={emoji => toggleMessageReaction(activeMsg, emoji)} />
           </Suspense>
         )}
+        <AnimatePresence>
+          {activeMsg && overlayLayout && (
+            <motion.div
+              key="action-menu"
+              initial={{ opacity: 0, scale: 0.9, y: -6 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: -6 }}
+              transition={{ type: 'spring', damping: 24, stiffness: 420 }}
+              className="fixed z-[56] flex flex-col min-w-[190px] rounded-2xl border border-border shadow-2xl overflow-hidden"
+              style={{ top: overlayLayout.menuTop, ...activeMsgSide, background: 'hsl(var(--popover))' }}
+            >
+              {activeMsgActions.map(a => (
+                <button
+                  key={a.key}
+                  onClick={a.onClick}
+                  className="flex items-center gap-2.5 px-3.5 py-2.5 text-sm hover:bg-secondary transition-colors text-left"
+                  style={a.destructive ? { color: 'hsl(var(--destructive))' } : a.accentColor ? { color: a.accentColor } : undefined}
+                >
+                  <a.icon size={15} /> {a.label}
+                </button>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Header — swaps to a contextual action bar whenever one or more messages are
             selected (long-press on mobile, double-click/right-click on desktop, or any
@@ -1043,17 +1152,37 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
               <XIcon size={17} />
             </button>
             <span className="flex-1 text-sm font-semibold text-foreground ml-1">{selectedMsgs.length} selected</span>
-            {getSelectionActions(selectedMsgs).map(a => (
-              <button
-                key={a.key}
-                onClick={a.onClick}
-                className="p-2.5 rounded-full bg-secondary hover:opacity-75 transition-opacity"
-                style={a.destructive ? { color: 'hsl(var(--destructive))' } : a.accentColor ? { color: a.accentColor } : undefined}
-                title={a.label}
-              >
-                <a.icon size={16} />
-              </button>
-            ))}
+            {/* A row of icon-only buttons was ambiguous whenever a selection qualified
+                for both "Delete for All" and "Delete for Me" — two unlabeled trash
+                icons side by side. A single "⋮" opening a written-label dropdown
+                (same pattern as the chevron menu) removes the ambiguity outright. */}
+            {getSelectionActions(selectedMsgs).length > 0 && (
+              <div ref={selectionMenuRef} className="relative">
+                <button
+                  onClick={() => setShowSelectionMenu(p => !p)}
+                  className="p-2.5 rounded-full bg-secondary hover:opacity-75 transition-opacity"
+                >
+                  <MoreVertical size={16} />
+                </button>
+                {showSelectionMenu && (
+                  <div
+                    className="absolute top-full right-0 mt-1 z-30 flex flex-col min-w-[190px] rounded-xl border border-border shadow-lg overflow-hidden"
+                    style={{ background: 'hsl(var(--popover))' }}
+                  >
+                    {getSelectionActions(selectedMsgs).map(a => (
+                      <button
+                        key={a.key}
+                        onClick={() => { setShowSelectionMenu(false); a.onClick(); }}
+                        className="flex items-center gap-2.5 px-3.5 py-2.5 text-sm hover:bg-secondary transition-colors text-left"
+                        style={a.destructive ? { color: 'hsl(var(--destructive))' } : a.accentColor ? { color: a.accentColor } : undefined}
+                      >
+                        <a.icon size={15} /> {a.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         ) : (
           <div className="flex items-center gap-3 px-4 py-3 border-b border-border flex-shrink-0">
@@ -1109,6 +1238,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
             const isEditing = editingMessageId === msg.id;
             const isSelected = selectedMessageIds.has(msg.id);
             const selectionActive = selectedMessageIds.size > 0;
+            const isActive = activeMessageId === msg.id;
             const isRead = isMe && !!partnerLastReadAt && new Date(msg.created_at) <= new Date(partnerLastReadAt);
             const replyTo = msg.reply_to_id ? messages.find(m => m.id === msg.reply_to_id) : null;
             const reactionGroups = {};
@@ -1172,8 +1302,11 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                       // here as a scroll", leaving Framer's drag="x" solely responsible for it.
                       touchAction: 'pan-y',
                       ...(isSelected ? { background: 'hsl(var(--theme-accent) / 0.06)', borderRadius: 12, margin: '0 -8px', padding: '2px 8px' } : {}),
+                      ...(isActive ? { zIndex: 56, boxShadow: '0 10px 34px rgba(0,0,0,0.28)', borderRadius: 12 } : {}),
                     }}
-                    drag={canReply && !isEditing && !selectionActive ? 'x' : false}
+                    animate={{ scale: isActive ? 1.035 : 1 }}
+                    transition={{ type: 'spring', damping: 20, stiffness: 320 }}
+                    drag={canReply && !isEditing && !selectionActive && !activeMessageId ? 'x' : false}
                     dragConstraints={{ left: 0, right: SWIPE_REPLY_MAX }}
                     dragElastic={{ left: 0, right: 0.3 }}
                     dragSnapToOrigin
@@ -1193,17 +1326,22 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                         setReplyingTo(msg);
                       }
                     }}
-                    onPointerDown={() => handleMsgPointerDown(msg.id, canAct)}
+                    onPointerDown={() => handleMsgPointerDown(msg.id, canAct, selectionActive)}
                     onPointerUp={() => handleMsgPointerUp(msg.id, canAct, selectionActive)}
                     onPointerCancel={() => handleMsgPointerUp(msg.id, canAct, selectionActive)}
-                    onContextMenu={e => { e.preventDefault(); if (canAct) enterSelection(msg.id); }}
+                    onContextMenu={e => {
+                      e.preventDefault();
+                      if (!canAct) return;
+                      if (selectionActive) toggleMessageSelection(msg.id);
+                      else openActionOverlay(msg.id);
+                    }}
                     onDoubleClick={() => { if (canAct) enterSelection(msg.id); }}
                   >
                     {/* Reply-to reference — hidden once either side of the reference is gone:
                         the original being quoted, or this reply message itself. */}
                     {replyTo && !replyTo.is_deleted && !msg.is_deleted && !hiddenMsgIds.has(replyTo.id) && (
                       <button
-                        onClick={() => { if (selectionActive) return; scrollToMessage(replyTo.id); }}
+                        onClick={() => { if (isActive) { closeActionOverlay(); return; } if (selectionActive) return; scrollToMessage(replyTo.id); }}
                         className="max-w-[72%] text-left px-2.5 py-1.5 rounded-xl mb-1 border-l-2 transition-opacity hover:opacity-80 flex items-center gap-2"
                         style={{ background: 'hsl(var(--theme-accent) / 0.07)', borderLeftColor: 'hsl(var(--theme-accent))' }}
                       >
@@ -1235,6 +1373,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                             style={{ cursor: 'pointer', userSelect: 'none' }}
                             onClick={() => {
                               if (longPressActivated.current) { longPressActivated.current = false; return; }
+                              if (isActive) { closeActionOverlay(); return; }
                               if (selectionActive) return;
                               setStickerPreview(msg);
                             }}
@@ -1246,7 +1385,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                               isExternal={!msg.content.includes(STORAGE_URL_MARKER)}
                             />
                           </div>
-                          {canAct && !selectionActive && (
+                          {canAct && !selectionActive && !isActive && (
                             <button
                               onClick={e => { e.stopPropagation(); setChevronMenuMsgId(prev => prev === msg.id ? null : msg.id); }}
                               className="desktop-only absolute top-1.5 right-1.5 items-center justify-center w-5 h-5 rounded-full opacity-40 hover:opacity-100 transition-opacity"
@@ -1292,8 +1431,12 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                           cursor: canAct ? 'pointer' : 'default',
                           userSelect: 'none',
                         }}
+                        onClick={() => {
+                          if (longPressActivated.current) { longPressActivated.current = false; return; }
+                          if (isActive) closeActionOverlay();
+                        }}
                       >
-                        {canAct && !selectionActive && msg.message_type !== 'system' && (
+                        {canAct && !selectionActive && !isActive && msg.message_type !== 'system' && (
                           <button
                             onClick={e => { e.stopPropagation(); setChevronMenuMsgId(prev => prev === msg.id ? null : msg.id); }}
                             className="desktop-only absolute top-1.5 right-1.5 items-center justify-center w-5 h-5 rounded-full opacity-40 hover:opacity-100 transition-opacity"
