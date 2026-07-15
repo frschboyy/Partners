@@ -5,11 +5,57 @@ import Avatar from '@/components/Avatar';
 import PostImage from '@/components/PostImage';
 const ChatPicker = lazy(() => import('@/components/ChatPicker'));
 const ReactionEmojiPicker = lazy(() => import('@/components/ReactionEmojiPicker'));
-import { Send, ArrowLeft, Pencil, Trash2, Check, X as XIcon, Smile, Star, CornerUpLeft, Copy, Plus, ChevronDown } from 'lucide-react';
+import { Send, ArrowLeft, Pencil, Trash2, Check, X as XIcon, Smile, Star, CornerUpLeft, Copy, Plus, ChevronDown, ImageOff } from 'lucide-react';
 import { haptic } from '@/lib/haptic';
 import { useToast, Toast } from '@/components/Toast';
 
 const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '👏'];
+const STORAGE_URL_MARKER = '/object/public/uploads/';
+
+function guessImageExt(blobType) {
+  if (blobType.includes('gif')) return 'gif';
+  if (blobType.includes('webp')) return 'webp';
+  if (blobType.includes('png')) return 'png';
+  return 'jpg';
+}
+
+// A sticker/GIF hotlinked from an external CDN (pre-dating the re-host-at-send-time
+// fix) can have its content pulled by the source later — the URL keeps resolving,
+// but to a small placeholder graphic instead of a 404, so PostImage's onError never
+// fires. Flagging anything suspiciously tiny as unavailable turns that confusing
+// silent swap into a clear, honest message instead. Only applied to external URLs —
+// anything already in our own storage is trusted outright.
+function ChatMediaBubble({ src, alt, maxHeight, isExternal }) {
+  const [unavailable, setUnavailable] = useState(false);
+
+  if (unavailable) {
+    return (
+      <div
+        className="w-full flex flex-col items-center justify-center gap-1 py-6 text-muted-foreground"
+        style={{ minHeight: 80 }}
+        onClick={e => e.stopPropagation()}
+      >
+        <ImageOff size={20} />
+        <span className="text-xs">{alt === 'sticker' ? 'Sticker' : 'GIF'} unavailable</span>
+      </div>
+    );
+  }
+
+  return (
+    <PostImage
+      src={src}
+      alt={alt}
+      className="w-full"
+      style={{ maxHeight, objectFit: 'cover', display: 'block' }}
+      loading="lazy"
+      onLoad={e => {
+        if (isExternal && (e.target.naturalWidth < 60 || e.target.naturalHeight < 60)) {
+          setUnavailable(true);
+        }
+      }}
+    />
+  );
+}
 
 const REACTION_BAR_HEIGHT = 48;
 const REACTION_GAP = 10;
@@ -544,20 +590,31 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
   async function addStickerToMineWeb(url) {
     setSavingSticker(url);
     try {
-      const marker = '/object/public/uploads/';
-      const idx = url.indexOf(marker);
-      if (idx === -1) throw new Error('Cannot save this sticker');
-      const sourcePath = url.slice(idx + marker.length);
-      const filename = sourcePath.split('/').pop();
-      const destName = `${Date.now()}_${filename}`;
-      const { error } = await supabase.storage.from('uploads').copy(sourcePath, `stickers/${currentUser.id}/${destName}`);
-      if (error) throw error;
+      const idx = url.indexOf(STORAGE_URL_MARKER);
+      let destName;
+      if (idx !== -1) {
+        // Already in our own storage (e.g. a partner's "My Stickers" upload) — cheap copy.
+        const sourcePath = url.slice(idx + STORAGE_URL_MARKER.length);
+        const filename = sourcePath.split('/').pop();
+        destName = `${Date.now()}_${filename}`;
+        const { error } = await supabase.storage.from('uploads').copy(sourcePath, `stickers/${currentUser.id}/${destName}`);
+        if (error) throw error;
+      } else {
+        // External URL (e.g. a Giphy link sent before re-hosting existed) — fetch and upload directly.
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('Could not fetch this sticker');
+        const blob = await res.blob();
+        destName = `${Date.now()}.${guessImageExt(blob.type)}`;
+        const { error } = await supabase.storage.from('uploads').upload(`stickers/${currentUser.id}/${destName}`, blob, { contentType: blob.type || 'image/gif' });
+        if (error) throw error;
+      }
       setMineFilenames(prev => new Set([...prev, destName]));
       setStickerPreview(null);
       setStickerSavedMsg(true);
       setTimeout(() => setStickerSavedMsg(false), 2500);
     } catch (err) {
       console.error('Failed to save sticker:', err);
+      showToast('Could not save this sticker — please try again', 'error');
     }
     setSavingSticker(null);
   }
@@ -668,17 +725,42 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     return () => document.removeEventListener('mousedown', onMouseDown);
   }, [showPicker]);
 
+  // Giphy (and any other external source) can remove or expire content later, at
+  // which point their CDN can start serving a placeholder instead of the sticker/
+  // GIF that was actually sent — and "Add to Mine" can't reach a URL we don't own.
+  // Re-hosting into our own storage at send time makes the message permanent and
+  // makes it work like any self-uploaded sticker from then on. Best-effort: if the
+  // fetch/upload fails (e.g. a CORS-restricted source), fall back to the original
+  // URL rather than blocking the send.
+  async function rehostExternalMedia(url) {
+    if (url.includes(STORAGE_URL_MARKER)) return url;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Fetch failed');
+      const blob = await res.blob();
+      const path = `chat-media/${currentUser.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${guessImageExt(blob.type)}`;
+      const { error } = await supabase.storage.from('uploads').upload(path, blob, { contentType: blob.type || 'image/gif' });
+      if (error) throw error;
+      const { data: { publicUrl } } = supabase.storage.from('uploads').getPublicUrl(path);
+      return publicUrl;
+    } catch (err) {
+      console.error('Failed to re-host media, sending original URL instead:', err);
+      return url;
+    }
+  }
+
   async function sendMedia(previewUrl, fullUrl, type) {
     if (!selectedPartnership) return;
     setShowPicker(false);
     const replySnapshot = replyingTo;
     setReplyingTo(null);
     try {
+      const hostedUrl = await rehostExternalMedia(fullUrl || previewUrl);
       await api.entities.ChatMessage.create({
         partnership_id: selectedPartnership.id,
         sender_id: currentUser.id,
         sender_name: profile?.display_name || currentUser.full_name,
-        content: fullUrl || previewUrl,
+        content: hostedUrl,
         message_type: type,
         reply_to_id: replySnapshot?.id || null,
       });
@@ -1039,12 +1121,11 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                             setStickerPreview(msg);
                           }}
                         >
-                          <PostImage
+                          <ChatMediaBubble
                             src={msg.content}
                             alt={msg.message_type}
-                            className="w-full"
-                            style={{ maxHeight: msg.message_type === 'sticker' ? 120 : 160, objectFit: 'cover', display: 'block' }}
-                            loading="lazy"
+                            maxHeight={msg.message_type === 'sticker' ? 120 : 160}
+                            isExternal={!msg.content.includes(STORAGE_URL_MARKER)}
                           />
                         </motion.div>
                         {canAct && (
