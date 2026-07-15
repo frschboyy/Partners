@@ -254,7 +254,10 @@ function MainApp({ user }) {
     }
     if (tab === 'chat') {
       return (
-        <div className="h-full overflow-y-auto">
+        // Chat manages its own internal scroll region (fixed header/composer, scrollable
+        // message list) — an outer overflow-y-auto here would let the whole thing scroll
+        // as one blob, dragging the header and composer along with the conversation.
+        <div className="h-full overflow-hidden">
           <Chat currentUser={user} profile={profile} onTabChange={navigateToTab} navIntent={navIntent} onClearNavIntent={() => setNavIntent(null)} />
         </div>
       );

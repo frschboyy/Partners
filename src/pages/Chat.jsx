@@ -53,6 +53,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
   const { message: toastMessage, variant: toastVariant, show: showToast } = useToast();
   const bottomRef = useRef(null);
   const pickerRef = useRef(null);
+  const menuRef = useRef(null);
   const selectedPartnershipRef = useRef(null);
   const msgRefs = useRef({});
   const typingChannelsRef = useRef({});
@@ -444,7 +445,11 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
   // Close ⋮ dropdown when clicking elsewhere
   useEffect(() => {
     if (!menuMsgId) return;
-    function onMouseDown() { setMenuMsgId(null); }
+    function onMouseDown(e) {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setMenuMsgId(null);
+      }
+    }
     document.addEventListener('mousedown', onMouseDown);
     return () => document.removeEventListener('mousedown', onMouseDown);
   }, [menuMsgId]);
@@ -825,6 +830,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                 {/* ⋮ context dropdown menu */}
                 {showMenu && (
                   <div
+                    ref={menuRef}
                     className={`flex flex-col gap-0.5 mt-1 min-w-[140px] rounded-xl border border-border shadow-lg overflow-hidden z-20`}
                     style={{ background: 'hsl(var(--popover))' }}
                     onClick={e => e.stopPropagation()}
