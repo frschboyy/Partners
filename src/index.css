@@ -288,6 +288,18 @@
     @apply transition-transform active:scale-95;
   }
 
+  /* Shown only on precise-pointer/hover-capable devices (mouse/trackpad) — used
+     for desktop-only affordances like the message action chevron, which would
+     just be visual clutter on a touch device that already has long-press. */
+  .desktop-only {
+    display: none;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .desktop-only {
+      display: flex;
+    }
+  }
+
   /* Feed full-screen */
   .feed-container {
     position: fixed;

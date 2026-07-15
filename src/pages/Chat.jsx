@@ -5,7 +5,7 @@ import Avatar from '@/components/Avatar';
 import PostImage from '@/components/PostImage';
 const ChatPicker = lazy(() => import('@/components/ChatPicker'));
 const ReactionEmojiPicker = lazy(() => import('@/components/ReactionEmojiPicker'));
-import { Send, ArrowLeft, Pencil, Trash2, Check, X as XIcon, Smile, Star, CornerUpLeft, Copy, Plus } from 'lucide-react';
+import { Send, ArrowLeft, Pencil, Trash2, Check, X as XIcon, Smile, Star, CornerUpLeft, Copy, Plus, ChevronDown } from 'lucide-react';
 import { haptic } from '@/lib/haptic';
 import { useToast, Toast } from '@/components/Toast';
 
@@ -17,6 +17,8 @@ const MENU_GAP = 8;
 const MENU_ITEM_HEIGHT = 46;
 const HEADER_SAFE_TOP = 76;
 const COMPOSER_SAFE_BOTTOM = 100;
+const SWIPE_REPLY_THRESHOLD = 60;
+const SWIPE_REPLY_MAX = 72;
 
 // Positions the floating reaction bar + context menu around a message's measured
 // rect — below the message when there's room, flipping both above it otherwise,
@@ -55,6 +57,10 @@ function formatTime(dateStr) {
   return new Date(dateStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+function isMediaMsg(msg) {
+  return msg?.message_type === 'sticker' || msg?.message_type === 'gif';
+}
+
 export default function Chat({ currentUser, profile, onTabChange, navIntent, onClearNavIntent }) {
   const [partnerships, setPartnerships] = useState([]);
   const [loadingPartnerships, setLoadingPartnerships] = useState(true);
@@ -66,9 +72,13 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
   const [sending, setSending] = useState(false);
   const [unreadCounts, setUnreadCounts] = useState({});
   const [lastActivity, setLastActivity] = useState({});
+  // Mobile long-press overlay (reaction bar + floating menu)
   const [activeMessageId, setActiveMessageId] = useState(null);
   const [actionRect, setActionRect] = useState(null);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
+  // Desktop-only: chevron dropdown + double-click select
+  const [chevronMenuMsgId, setChevronMenuMsgId] = useState(null);
+  const [selectedMessageId, setSelectedMessageId] = useState(null);
   const [savingSticker, setSavingSticker] = useState(null);
   const [stickerSavedMsg, setStickerSavedMsg] = useState(false);
   const [partnerLastReadAt, setPartnerLastReadAt] = useState(null);
@@ -88,8 +98,10 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
   const { message: toastMessage, variant: toastVariant, show: showToast } = useToast();
   const bottomRef = useRef(null);
   const pickerRef = useRef(null);
+  const chevronMenuRef = useRef(null);
   const selectedPartnershipRef = useRef(null);
   const msgRefs = useRef({});
+  const replyIconRefs = useRef({});
   const typingChannelsRef = useRef({});
   const typingTimersRef = useRef({});
   const typingThrottleRef = useRef(null);
@@ -241,6 +253,34 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Desktop: Esc or a click outside the selected message clears the selection.
+  useEffect(() => {
+    if (!selectedMessageId) return;
+    function onKeyDown(e) { if (e.key === 'Escape') setSelectedMessageId(null); }
+    function onMouseDown(e) {
+      const el = msgRefs.current[selectedMessageId];
+      if (el && !el.contains(e.target)) setSelectedMessageId(null);
+    }
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('mousedown', onMouseDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('mousedown', onMouseDown);
+    };
+  }, [selectedMessageId]);
+
+  // Desktop: close the chevron dropdown on outside click.
+  useEffect(() => {
+    if (!chevronMenuMsgId) return;
+    function onMouseDown(e) {
+      if (chevronMenuRef.current && !chevronMenuRef.current.contains(e.target)) {
+        setChevronMenuMsgId(null);
+      }
+    }
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
+  }, [chevronMenuMsgId]);
+
   async function loadPartnerships() {
     setLoadingPartnerships(true);
     try {
@@ -366,10 +406,36 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     return { isMe, canEdit, canDeleteAll, canSaveSticker, canReply, canCopy, canAct };
   }
 
+  // Shared action list for the mobile overlay menu, the desktop chevron dropdown,
+  // and the desktop selected-message header bar — each renders it with its own
+  // layout, but the actions and their permission gating live in one place.
+  function getMessageMenuActions(msg, perms, closeUI) {
+    const actions = [];
+    if (perms.canReply) {
+      actions.push({ key: 'reply', label: 'Reply', icon: CornerUpLeft, onClick: () => { setReplyingTo(msg); closeUI(); } });
+    }
+    if (perms.canCopy) {
+      actions.push({ key: 'copy', label: 'Copy', icon: Copy, onClick: () => { copyMessage(msg); closeUI(); } });
+    }
+    if (perms.canSaveSticker) {
+      actions.push({ key: 'save', label: 'Save to Mine', icon: Star, accentColor: '#ca8a04', onClick: () => { setStickerPreview(msg); closeUI(); } });
+    }
+    if (perms.canEdit) {
+      actions.push({ key: 'edit', label: 'Edit', icon: Pencil, onClick: () => { setEditText(msg.content); setEditingMessageId(msg.id); closeUI(); } });
+    }
+    if (perms.canDeleteAll) {
+      actions.push({ key: 'deleteAll', label: 'Delete for All', icon: Trash2, destructive: true, onClick: () => { deleteMessage(msg); closeUI(); } });
+    }
+    actions.push({ key: 'deleteMe', label: 'Delete for Me', icon: Trash2, destructive: true, onClick: () => { deleteForMe(msg); closeUI(); } });
+    return actions;
+  }
+
   function openActionOverlay(msgId) {
     const el = msgRefs.current[msgId];
     if (el) setActionRect(el.getBoundingClientRect());
     setActiveMessageId(msgId);
+    setSelectedMessageId(null);
+    setChevronMenuMsgId(null);
     haptic([30, 15, 50]);
   }
 
@@ -447,7 +513,17 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
 
   async function deleteMessage(msg) {
     closeActionOverlay();
-    await api.entities.ChatMessage.update(msg.id, { is_deleted: true });
+    setSelectedMessageId(null);
+    try {
+      const { error } = await supabase.rpc('soft_delete_chat_message', { p_message_id: msg.id });
+      if (error) throw error;
+    } catch (err) {
+      console.error('Failed to delete message:', err);
+      const msg2 = err?.message?.includes('window')
+        ? "Too late to delete this for everyone — it's outside the 30-minute window."
+        : 'Failed to delete — please try again';
+      showToast(msg2, 'error');
+    }
   }
 
   async function toggleMessageReaction(msg, emoji) {
@@ -570,16 +646,12 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
 
     const activeMsg = activeMessageId ? messages.find(m => m.id === activeMessageId) : null;
     const activePerms = activeMsg ? getMsgPermissions(activeMsg) : null;
-    const activeMenuItems = activeMsg ? [
-      activePerms.canReply && 'reply',
-      activePerms.canCopy && 'copy',
-      activePerms.canSaveSticker && 'save',
-      activePerms.canEdit && 'edit',
-      activePerms.canDeleteAll && 'deleteAll',
-      'deleteMe',
-    ].filter(Boolean) : [];
+    const activeMenuItems = activeMsg ? getMessageMenuActions(activeMsg, activePerms, closeActionOverlay) : [];
     const overlayLayout = activeMsg && actionRect ? getOverlayLayout(actionRect, activeMenuItems.length) : null;
     const overlaySide = activePerms?.isMe ? { right: 16 } : { left: 16 };
+
+    const selectedMsg = selectedMessageId ? messages.find(m => m.id === selectedMessageId) : null;
+    const selectedPerms = selectedMsg ? getMsgPermissions(selectedMsg) : null;
 
     return (
       <div className="flex flex-col h-full bg-background" data-no-swipe-nav>
@@ -636,7 +708,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
           )}
         </AnimatePresence>
 
-        {/* Message action overlay: dim/blur backdrop + floating reaction bar + context menu */}
+        {/* Mobile: message action overlay — dim/blur backdrop + floating reaction bar + context menu */}
         <AnimatePresence>
           {activeMsg && !editingMessageId && overlayLayout && (
             <React.Fragment key="action-overlay">
@@ -679,41 +751,16 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                 className="fixed z-50 flex flex-col min-w-[200px] rounded-2xl border border-border shadow-2xl overflow-hidden"
                 style={{ top: overlayLayout.menuTop, ...overlaySide, background: 'hsl(var(--popover))' }}
               >
-                {activePerms.canReply && (
-                  <button onClick={() => { setReplyingTo(activeMsg); closeActionOverlay(); }}
-                    className="flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-secondary transition-colors text-left">
-                    Reply <CornerUpLeft size={15} />
+                {activeMenuItems.map((a, i) => (
+                  <button
+                    key={a.key}
+                    onClick={a.onClick}
+                    className={`flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-secondary transition-colors text-left ${i > 0 ? 'border-t border-border' : ''}`}
+                    style={a.destructive ? { color: 'hsl(var(--destructive))' } : a.accentColor ? { color: a.accentColor } : undefined}
+                  >
+                    {a.label} <a.icon size={15} />
                   </button>
-                )}
-                {activePerms.canCopy && (
-                  <button onClick={() => copyMessage(activeMsg)}
-                    className="flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-secondary transition-colors text-left border-t border-border">
-                    Copy <Copy size={15} />
-                  </button>
-                )}
-                {activePerms.canSaveSticker && (
-                  <button onClick={() => { setStickerPreview(activeMsg); closeActionOverlay(); }}
-                    className="flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-secondary transition-colors text-left border-t border-border"
-                    style={{ color: '#ca8a04' }}>
-                    Save to Mine <Star size={15} />
-                  </button>
-                )}
-                {activePerms.canEdit && (
-                  <button onClick={() => { setEditText(activeMsg.content); setEditingMessageId(activeMsg.id); closeActionOverlay(); }}
-                    className="flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-secondary transition-colors text-left border-t border-border">
-                    Edit <Pencil size={15} />
-                  </button>
-                )}
-                {activePerms.canDeleteAll && (
-                  <button onClick={() => deleteMessage(activeMsg)}
-                    className="flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-secondary transition-colors text-left border-t border-border text-destructive">
-                    Delete for All <Trash2 size={15} />
-                  </button>
-                )}
-                <button onClick={() => deleteForMe(activeMsg)}
-                  className="flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-secondary transition-colors text-left border-t border-border text-destructive">
-                  Delete for Me <Trash2 size={15} />
-                </button>
+                ))}
               </motion.div>
               {showReactionPicker && (
                 <Suspense fallback={null}>
@@ -724,21 +771,44 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
           )}
         </AnimatePresence>
 
-        {/* Header — always visible */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-border flex-shrink-0">
-          <motion.button
-            whileTap={{ scale: 0.85, opacity: 0.7 }}
-            onClick={() => setSelectedPartnership(null)}
-            className="p-2.5 rounded-full bg-secondary"
-          >
-            <ArrowLeft size={18} />
-          </motion.button>
-          <Avatar profile={partnerProfile} size="sm" noAutoFlip />
-          <div>
-            <p className="font-bold">{partnerName}</p>
-            <p className="text-xs text-muted-foreground">Accountability partner</p>
+        {/* Header — swaps to a contextual action bar when a message is selected (desktop double-click) */}
+        {selectedMsg ? (
+          <div className="flex items-center gap-2 px-3 py-3 border-b border-border flex-shrink-0">
+            <button
+              onClick={() => setSelectedMessageId(null)}
+              className="p-2 rounded-full bg-secondary hover:opacity-75 transition-opacity"
+            >
+              <XIcon size={17} />
+            </button>
+            <span className="flex-1 text-sm font-semibold text-foreground ml-1">1 selected</span>
+            {getMessageMenuActions(selectedMsg, selectedPerms, () => setSelectedMessageId(null)).map(a => (
+              <button
+                key={a.key}
+                onClick={a.onClick}
+                className="p-2.5 rounded-full bg-secondary hover:opacity-75 transition-opacity"
+                style={a.destructive ? { color: 'hsl(var(--destructive))' } : a.accentColor ? { color: a.accentColor } : undefined}
+                title={a.label}
+              >
+                <a.icon size={16} />
+              </button>
+            ))}
           </div>
-        </div>
+        ) : (
+          <div className="flex items-center gap-3 px-4 py-3 border-b border-border flex-shrink-0">
+            <motion.button
+              whileTap={{ scale: 0.85, opacity: 0.7 }}
+              onClick={() => setSelectedPartnership(null)}
+              className="p-2.5 rounded-full bg-secondary"
+            >
+              <ArrowLeft size={18} />
+            </motion.button>
+            <Avatar profile={partnerProfile} size="sm" noAutoFlip />
+            <div>
+              <p className="font-bold">{partnerName}</p>
+              <p className="text-xs text-muted-foreground">Accountability partner</p>
+            </div>
+          </div>
+        )}
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -770,14 +840,17 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
             </div>
           ) : null}
           {messages.filter(msg => !hiddenMsgIds.has(msg.id)).map(msg => {
-            const { isMe, canEdit, canDeleteAll, canSaveSticker, canAct } = getMsgPermissions(msg);
+            const perms = getMsgPermissions(msg);
+            const { isMe, canAct, canReply } = perms;
             const isEditing = editingMessageId === msg.id;
             const isActive = activeMessageId === msg.id;
+            const isSelected = selectedMessageId === msg.id;
             const isRead = isMe && !!partnerLastReadAt && new Date(msg.created_at) <= new Date(partnerLastReadAt);
             const replyTo = msg.reply_to_id ? messages.find(m => m.id === msg.reply_to_id) : null;
             const reactionGroups = {};
             (msg.reactions || []).forEach(r => { reactionGroups[r.emoji] = (reactionGroups[r.emoji] || 0) + 1; });
             const reactionEntries = Object.entries(reactionGroups);
+            const showChevronMenu = chevronMenuMsgId === msg.id;
 
             return (
               <motion.div
@@ -785,129 +858,232 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                 ref={el => { msgRefs.current[msg.id] = el; }}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} relative`}
-                style={isActive ? { zIndex: 55 } : {}}
-                onPointerDown={() => handleMsgPointerDown(msg.id, canAct)}
-                onPointerUp={handleMsgPointerUp}
-                onPointerCancel={handleMsgPointerUp}
-                onContextMenu={e => { e.preventDefault(); if (canAct) openActionOverlay(msg.id); }}
+                className="relative"
               >
-                {/* Reply-to reference */}
-                {replyTo && !hiddenMsgIds.has(replyTo.id) && (
-                  <button
-                    onClick={() => scrollToMessage(replyTo.id)}
-                    className={`max-w-[72%] text-left px-2.5 py-1.5 rounded-xl mb-1 border-l-2 transition-opacity hover:opacity-80`}
-                    style={{ background: 'hsl(var(--theme-accent) / 0.07)', borderLeftColor: 'hsl(var(--theme-accent))' }}
-                  >
-                    <p className="text-[10px] font-semibold" style={{ color: 'hsl(var(--theme-accent))' }}>
-                      {replyTo.sender_id === currentUser.id ? 'You' : partnerName}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground truncate">
-                      {replyTo.message_type === 'sticker' || replyTo.message_type === 'gif' ? '✨ Sticker' : replyTo.content}
-                    </p>
-                  </button>
-                )}
+                {/* Swipe-to-reply reveal icon — lives outside the draggable layer so it stays put */}
+                <div
+                  ref={el => { replyIconRefs.current[msg.id] = el; }}
+                  className="absolute left-2 top-1/2 pointer-events-none"
+                  style={{ opacity: 0, transform: 'translateY(-50%) scale(0.5)' }}
+                >
+                  <CornerUpLeft size={18} style={{ color: 'hsl(var(--theme-accent))' }} />
+                </div>
 
-                {/* Sticker / GIF */}
-                {(msg.message_type === 'gif' || msg.message_type === 'sticker') && !msg.is_deleted ? (
-                  <>
+                <motion.div
+                  className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} relative`}
+                  style={{
+                    ...(isActive ? { zIndex: 55 } : {}),
+                    ...(isSelected ? { background: 'hsl(var(--theme-accent) / 0.06)', borderRadius: 12, margin: '0 -8px', padding: '2px 8px' } : {}),
+                  }}
+                  drag={canReply && !isEditing ? 'x' : false}
+                  dragDirectionLock
+                  dragConstraints={{ left: 0, right: SWIPE_REPLY_MAX }}
+                  dragElastic={{ left: 0, right: 0.3 }}
+                  dragSnapToOrigin
+                  onDragStart={() => clearTimeout(longPressTimer.current)}
+                  onDrag={(e, info) => {
+                    const icon = replyIconRefs.current[msg.id];
+                    if (!icon) return;
+                    const progress = Math.min(Math.max(info.offset.x / SWIPE_REPLY_THRESHOLD, 0), 1);
+                    icon.style.opacity = String(progress);
+                    icon.style.transform = `translateY(-50%) scale(${0.5 + 0.5 * progress})`;
+                  }}
+                  onDragEnd={(e, info) => {
+                    const icon = replyIconRefs.current[msg.id];
+                    if (icon) { icon.style.opacity = '0'; icon.style.transform = 'translateY(-50%) scale(0.5)'; }
+                    if (info.offset.x > SWIPE_REPLY_THRESHOLD) {
+                      haptic([20]);
+                      setReplyingTo(msg);
+                    }
+                  }}
+                  onPointerDown={() => handleMsgPointerDown(msg.id, canAct)}
+                  onPointerUp={handleMsgPointerUp}
+                  onPointerCancel={handleMsgPointerUp}
+                  onContextMenu={e => { e.preventDefault(); if (canAct) openActionOverlay(msg.id); }}
+                  onDoubleClick={() => { if (canAct) { setSelectedMessageId(msg.id); setActiveMessageId(null); setChevronMenuMsgId(null); } }}
+                >
+                  {/* Reply-to reference */}
+                  {replyTo && !hiddenMsgIds.has(replyTo.id) && (
+                    <button
+                      onClick={() => scrollToMessage(replyTo.id)}
+                      className="max-w-[72%] text-left px-2.5 py-1.5 rounded-xl mb-1 border-l-2 transition-opacity hover:opacity-80 flex items-center gap-2"
+                      style={{ background: 'hsl(var(--theme-accent) / 0.07)', borderLeftColor: 'hsl(var(--theme-accent))' }}
+                    >
+                      {isMediaMsg(replyTo) && !replyTo.is_deleted && (
+                        <PostImage src={replyTo.content} alt="" className="w-8 h-8 rounded-md object-cover flex-shrink-0" />
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-semibold" style={{ color: 'hsl(var(--theme-accent))' }}>
+                          {replyTo.sender_id === currentUser.id ? 'You' : partnerName}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground truncate">
+                          {replyTo.is_deleted
+                            ? 'This message was deleted'
+                            : replyTo.message_type === 'sticker' ? 'Sticker'
+                            : replyTo.message_type === 'gif' ? 'GIF'
+                            : replyTo.content}
+                        </p>
+                      </div>
+                    </button>
+                  )}
+
+                  {/* Sticker / GIF */}
+                  {isMediaMsg(msg) && !msg.is_deleted ? (
+                    <>
+                      <motion.div
+                        className={`relative max-w-[220px] rounded-2xl overflow-hidden ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
+                        style={{ cursor: 'pointer', userSelect: 'none', boxShadow: isActive ? '0 8px 24px rgba(0,0,0,0.35)' : 'none' }}
+                        animate={{ scale: isActive ? 1.04 : 1 }}
+                        transition={{ type: 'spring', damping: 20, stiffness: 400 }}
+                        onClick={() => {
+                          if (longPressActivated.current) { longPressActivated.current = false; return; }
+                          if (isActive) { closeActionOverlay(); return; }
+                          setStickerPreview(msg);
+                        }}
+                      >
+                        <PostImage
+                          src={msg.content}
+                          alt={msg.message_type}
+                          className="w-full"
+                          style={{ maxHeight: msg.message_type === 'sticker' ? 120 : 160, objectFit: 'cover', display: 'block' }}
+                          loading="lazy"
+                        />
+                        {canAct && (
+                          <button
+                            onClick={e => { e.stopPropagation(); setChevronMenuMsgId(prev => prev === msg.id ? null : msg.id); }}
+                            className="desktop-only absolute top-1.5 right-1.5 items-center justify-center w-5 h-5 rounded-full opacity-40 hover:opacity-100 transition-opacity"
+                            style={{ background: 'rgba(0,0,0,0.4)' }}
+                          >
+                            <ChevronDown size={13} color="white" />
+                          </button>
+                        )}
+                        {showChevronMenu && (
+                          <div
+                            ref={chevronMenuRef}
+                            className="absolute top-full right-0 mt-1 z-30 flex flex-col min-w-[180px] rounded-xl border border-border shadow-lg overflow-hidden"
+                            style={{ background: 'hsl(var(--popover))' }}
+                            onClick={e => e.stopPropagation()}
+                          >
+                            {getMessageMenuActions(msg, perms, () => setChevronMenuMsgId(null)).map(a => (
+                              <button
+                                key={a.key}
+                                onClick={a.onClick}
+                                className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary transition-colors text-left"
+                                style={a.destructive ? { color: 'hsl(var(--destructive))' } : a.accentColor ? { color: a.accentColor } : undefined}
+                              >
+                                <a.icon size={13} /> {a.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </motion.div>
+                      {isMe && (
+                        <div className="flex items-center justify-end gap-0.5 mt-0.5 px-0.5">
+                          <Check size={9} strokeWidth={3} style={{ color: 'hsl(var(--muted-foreground))', opacity: isRead ? 0.85 : 0.4 }} />
+                          {isRead && <Check size={9} strokeWidth={3} style={{ color: 'hsl(var(--muted-foreground))', opacity: 0.85, marginLeft: -4 }} />}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    /* Text / system bubble */
                     <motion.div
-                      className={`relative max-w-[220px] rounded-2xl overflow-hidden ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
-                      style={{ cursor: 'pointer', userSelect: 'none', boxShadow: isActive ? '0 8px 24px rgba(0,0,0,0.35)' : 'none' }}
+                      className={`relative max-w-[78%] px-3.5 py-2.5 rounded-2xl ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
+                      style={{
+                        background: isMe ? 'hsl(var(--theme-accent))' : 'hsl(var(--secondary))',
+                        color: isMe ? 'hsl(var(--theme-accent-fg))' : 'hsl(var(--foreground))',
+                        cursor: canAct ? 'pointer' : 'default',
+                        userSelect: 'none',
+                        boxShadow: isActive ? '0 8px 24px rgba(0,0,0,0.35)' : 'none',
+                      }}
                       animate={{ scale: isActive ? 1.04 : 1 }}
                       transition={{ type: 'spring', damping: 20, stiffness: 400 }}
-                      onClick={() => {
-                        if (longPressActivated.current) { longPressActivated.current = false; return; }
-                        if (isActive) { closeActionOverlay(); return; }
-                        setStickerPreview(msg);
-                      }}
+                      onClick={() => { if (isActive) closeActionOverlay(); }}
                     >
-                      <PostImage
-                        src={msg.content}
-                        alt={msg.message_type}
-                        className="w-full"
-                        style={{ maxHeight: msg.message_type === 'sticker' ? 120 : 160, objectFit: 'cover', display: 'block' }}
-                        loading="lazy"
-                      />
-                    </motion.div>
-                    {isMe && (
-                      <div className="flex items-center justify-end gap-0.5 mt-0.5 px-0.5">
-                        <Check size={9} strokeWidth={3} style={{ color: 'hsl(var(--muted-foreground))', opacity: isRead ? 0.85 : 0.4 }} />
-                        {isRead && <Check size={9} strokeWidth={3} style={{ color: 'hsl(var(--muted-foreground))', opacity: 0.85, marginLeft: -4 }} />}
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  /* Text / system bubble */
-                  <motion.div
-                    className={`relative max-w-[78%] px-3.5 py-2.5 rounded-2xl ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
-                    style={{
-                      background: isMe ? 'hsl(var(--theme-accent))' : 'hsl(var(--secondary))',
-                      color: isMe ? 'hsl(var(--theme-accent-fg))' : 'hsl(var(--foreground))',
-                      cursor: canAct ? 'pointer' : 'default',
-                      userSelect: 'none',
-                      boxShadow: isActive ? '0 8px 24px rgba(0,0,0,0.35)' : 'none',
-                    }}
-                    animate={{ scale: isActive ? 1.04 : 1 }}
-                    transition={{ type: 'spring', damping: 20, stiffness: 400 }}
-                    onClick={() => { if (isActive) closeActionOverlay(); }}
-                  >
-                    {msg.is_deleted ? (
-                      <p className="text-xs italic opacity-50">Message deleted</p>
-                    ) : msg.message_type === 'system' ? (
-                      <p className="text-xs italic opacity-70">{msg.content}</p>
-                    ) : isEditing ? (
-                      <div className="flex items-center gap-2 min-w-[160px]">
-                        <input
-                          autoFocus
-                          className="bg-transparent border-none outline-none text-sm flex-1 min-w-0"
-                          style={{ color: 'inherit' }}
-                          value={editText}
-                          onChange={e => setEditText(e.target.value)}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') saveEdit(msg);
-                            if (e.key === 'Escape') setEditingMessageId(null);
-                          }}
-                        />
-                        <button onClick={e => { e.stopPropagation(); saveEdit(msg); }} className="opacity-80 flex-shrink-0">
-                          <Check size={14} />
+                      {canAct && !msg.is_deleted && msg.message_type !== 'system' && (
+                        <button
+                          onClick={e => { e.stopPropagation(); setChevronMenuMsgId(prev => prev === msg.id ? null : msg.id); }}
+                          className="desktop-only absolute top-1.5 right-1.5 items-center justify-center w-5 h-5 rounded-full opacity-40 hover:opacity-100 transition-opacity"
+                          style={{ color: isMe ? 'hsl(var(--theme-accent-fg))' : 'hsl(var(--foreground))', background: 'rgba(128,128,128,0.2)' }}
+                        >
+                          <ChevronDown size={13} />
                         </button>
-                        <button onClick={e => { e.stopPropagation(); setEditingMessageId(null); }} className="opacity-80 flex-shrink-0">
-                          <XIcon size={14} />
-                        </button>
-                      </div>
-                    ) : (
-                      <>
-                        <p className="text-sm leading-relaxed">{msg.content}</p>
-                        <div className="flex items-center justify-end gap-0.5 mt-0.5">
-                          <span className="text-[10px] opacity-60">
-                            {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                          {isMe && (
-                            <>
-                              <Check size={9} strokeWidth={3} style={{ opacity: isRead ? 0.85 : 0.4 }} />
-                              {isRead && <Check size={9} strokeWidth={3} style={{ opacity: 0.85, marginLeft: -4 }} />}
-                            </>
-                          )}
+                      )}
+                      {showChevronMenu && (
+                        <div
+                          ref={chevronMenuRef}
+                          className="absolute top-full right-0 mt-1 z-30 flex flex-col min-w-[180px] rounded-xl border border-border shadow-lg overflow-hidden"
+                          style={{ background: 'hsl(var(--popover))' }}
+                          onClick={e => e.stopPropagation()}
+                        >
+                          {getMessageMenuActions(msg, perms, () => setChevronMenuMsgId(null)).map(a => (
+                            <button
+                              key={a.key}
+                              onClick={a.onClick}
+                              className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary transition-colors text-left"
+                              style={a.destructive ? { color: 'hsl(var(--destructive))' } : a.accentColor ? { color: a.accentColor } : undefined}
+                            >
+                              <a.icon size={13} /> {a.label}
+                            </button>
+                          ))}
                         </div>
-                      </>
-                    )}
-                  </motion.div>
-                )}
+                      )}
+                      {msg.is_deleted ? (
+                        <p className="text-xs italic opacity-50">This message was deleted</p>
+                      ) : msg.message_type === 'system' ? (
+                        <p className="text-xs italic opacity-70">{msg.content}</p>
+                      ) : isEditing ? (
+                        <div className="flex items-center gap-2 min-w-[160px]">
+                          <input
+                            autoFocus
+                            className="bg-transparent border-none outline-none text-sm flex-1 min-w-0"
+                            style={{ color: 'inherit' }}
+                            value={editText}
+                            onChange={e => setEditText(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') saveEdit(msg);
+                              if (e.key === 'Escape') setEditingMessageId(null);
+                            }}
+                          />
+                          <button onClick={e => { e.stopPropagation(); saveEdit(msg); }} className="opacity-80 flex-shrink-0">
+                            <Check size={14} />
+                          </button>
+                          <button onClick={e => { e.stopPropagation(); setEditingMessageId(null); }} className="opacity-80 flex-shrink-0">
+                            <XIcon size={14} />
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="text-sm leading-relaxed">{msg.content}</p>
+                          <div className="flex items-center justify-end gap-0.5 mt-0.5">
+                            <span className="text-[10px] opacity-60">
+                              {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                            {isMe && (
+                              <>
+                                <Check size={9} strokeWidth={3} style={{ opacity: isRead ? 0.85 : 0.4 }} />
+                                {isRead && <Check size={9} strokeWidth={3} style={{ opacity: 0.85, marginLeft: -4 }} />}
+                              </>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </motion.div>
+                  )}
 
-                {/* Reaction summary */}
-                {reactionEntries.length > 0 && (
-                  <div
-                    className="flex items-center gap-1 px-2 py-0.5 rounded-full mt-1 text-xs shadow"
-                    style={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))' }}
-                  >
-                    {reactionEntries.map(([emoji, count]) => (
-                      <span key={emoji} className="flex items-center gap-0.5">
-                        {emoji}{count > 1 && <span className="text-[10px] text-muted-foreground">{count}</span>}
-                      </span>
-                    ))}
-                  </div>
-                )}
+                  {/* Reaction summary */}
+                  {reactionEntries.length > 0 && (
+                    <div
+                      className="flex items-center gap-1 px-2 py-0.5 rounded-full mt-1 text-xs shadow"
+                      style={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))' }}
+                    >
+                      {reactionEntries.map(([emoji, count]) => (
+                        <span key={emoji} className="flex items-center gap-0.5">
+                          {emoji}{count > 1 && <span className="text-[10px] text-muted-foreground">{count}</span>}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </motion.div>
               </motion.div>
             );
           })}
@@ -938,13 +1114,17 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
         {replyingTo && (
           <div className="flex items-center gap-2 px-4 py-2 border-t border-border flex-shrink-0"
             style={{ borderLeftWidth: 3, borderLeftColor: 'hsl(var(--theme-accent))' }}>
+            {isMediaMsg(replyingTo) && (
+              <PostImage src={replyingTo.content} alt="" className="w-9 h-9 rounded-lg object-cover flex-shrink-0" />
+            )}
             <div className="flex-1 min-w-0">
               <p className="text-[11px] font-semibold" style={{ color: 'hsl(var(--theme-accent))' }}>
                 {replyingTo.sender_id === currentUser.id ? 'Replying to yourself' : `Replying to ${partnerName}`}
               </p>
               <p className="text-[11px] text-muted-foreground truncate">
-                {replyingTo.message_type === 'sticker' || replyingTo.message_type === 'gif'
-                  ? '✨ Sticker' : replyingTo.content}
+                {replyingTo.message_type === 'sticker' ? 'Sticker'
+                  : replyingTo.message_type === 'gif' ? 'GIF'
+                  : replyingTo.content}
               </p>
             </div>
             <button onClick={() => setReplyingTo(null)} className="p-1 text-muted-foreground hover:text-foreground transition-colors flex-shrink-0">
