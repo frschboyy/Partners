@@ -586,10 +586,11 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     const canSaveSticker = !isMe && msg.message_type === 'sticker' && !msg.is_deleted;
     const canReply = !msg.is_deleted && msg.message_type !== 'system';
     const canCopy = !msg.is_deleted && msg.message_type === 'text';
-    // Even a message deleted for everyone still needs to be reachable — "Delete
-    // for Me" (always offered below) is the only action left at that point, but
-    // it has to stay available so the placeholder can be hidden from your own view.
-    const canAct = canReply || canEdit || canDeleteAll || canSaveSticker || msg.is_deleted;
+    // "Delete for Me" is always offered regardless of message type, ownership, age,
+    // or deletion state — so every message needs to stay selectable to reach it
+    // (this previously excluded system messages and any other message with no
+    // OTHER action available, which is why some messages refused to be selected).
+    const canAct = true;
     return { isMe, canEdit, canDeleteAll, canSaveSticker, canReply, canCopy, canAct };
   }
 
@@ -830,8 +831,21 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     }, 480);
   }, []);
 
-  const handleMsgPointerUp = useCallback(() => {
+  // Driven entirely by our own pointer lifecycle rather than a separate click event —
+  // relying on the browser's click/dblclick synthesis on this element was unreliable
+  // on touch devices (it competes with long-press timing and, previously, drag), which
+  // is what made some taps silently fail to register at all. A quick release (the
+  // long-press timer never completed) only does something if selection mode is
+  // already active, in which case it toggles this message directly — entering
+  // selection mode for the very first message still requires the long-press/
+  // double-click/right-click, only subsequent taps are single-tap-to-toggle.
+  const handleMsgPointerUp = useCallback((msgId, canAct, selectionActive) => {
     clearTimeout(longPressTimer.current);
+    if (longPressActivated.current) {
+      longPressActivated.current = false;
+      return;
+    }
+    if (selectionActive && canAct) toggleMessageSelection(msgId);
   }, []);
 
   useEffect(() => {
@@ -1119,14 +1133,6 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
             const reactionEntries = Object.entries(reactionGroups);
             const showChevronMenu = chevronMenuMsgId === msg.id;
 
-            // Tapping anywhere on the row toggles selection once selection mode is
-            // active; the bubble/reply-quote handlers below bow out (no side effect,
-            // just let the click bubble here) when that's the case, so there's exactly
-            // one place deciding "this tap means toggle" rather than several racing.
-            function handleRowClick() {
-              if (selectionActive && canAct) toggleMessageSelection(msg.id);
-            }
-
             return (
               <React.Fragment key={msg.id}>
                 {showDateSeparator && (
@@ -1205,11 +1211,10 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                       }
                     }}
                     onPointerDown={() => handleMsgPointerDown(msg.id, canAct)}
-                    onPointerUp={handleMsgPointerUp}
-                    onPointerCancel={handleMsgPointerUp}
+                    onPointerUp={() => handleMsgPointerUp(msg.id, canAct, selectionActive)}
+                    onPointerCancel={() => handleMsgPointerUp(msg.id, canAct, selectionActive)}
                     onContextMenu={e => { e.preventDefault(); if (canAct) enterSelection(msg.id); }}
                     onDoubleClick={() => { if (canAct) enterSelection(msg.id); }}
-                    onClick={handleRowClick}
                   >
                     {/* Reply-to reference — hidden once either side of the reference is gone:
                         the original being quoted, or this reply message itself. */}
