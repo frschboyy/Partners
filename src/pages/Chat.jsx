@@ -253,6 +253,14 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // If the message someone's mid-reply-to gets deleted for everyone before they
+  // send, drop the staged reply rather than sending a reference to nothing.
+  useEffect(() => {
+    if (!replyingTo) return;
+    const current = messages.find(m => m.id === replyingTo.id);
+    if (current?.is_deleted) setReplyingTo(null);
+  }, [messages, replyingTo]);
+
   // Desktop: Esc or a click outside the selected message clears the selection.
   useEffect(() => {
     if (!selectedMessageId) return;
@@ -514,11 +522,16 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
   async function deleteMessage(msg) {
     closeActionOverlay();
     setSelectedMessageId(null);
+    // Optimistic: don't wait on the realtime round-trip to reflect the deletion
+    // for the person who just triggered it — the other party still gets it via
+    // the postgres_changes subscription like any other update.
+    setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, is_deleted: true } : m));
     try {
       const { error } = await supabase.rpc('soft_delete_chat_message', { p_message_id: msg.id });
       if (error) throw error;
     } catch (err) {
       console.error('Failed to delete message:', err);
+      setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, is_deleted: false } : m));
       const msg2 = err?.message?.includes('window')
         ? "Too late to delete this for everyone — it's outside the 30-minute window."
         : 'Failed to delete — please try again';
@@ -903,13 +916,13 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                   onDoubleClick={() => { if (canAct) { setSelectedMessageId(msg.id); setActiveMessageId(null); setChevronMenuMsgId(null); } }}
                 >
                   {/* Reply-to reference */}
-                  {replyTo && !hiddenMsgIds.has(replyTo.id) && (
+                  {replyTo && !replyTo.is_deleted && !hiddenMsgIds.has(replyTo.id) && (
                     <button
                       onClick={() => scrollToMessage(replyTo.id)}
                       className="max-w-[72%] text-left px-2.5 py-1.5 rounded-xl mb-1 border-l-2 transition-opacity hover:opacity-80 flex items-center gap-2"
                       style={{ background: 'hsl(var(--theme-accent) / 0.07)', borderLeftColor: 'hsl(var(--theme-accent))' }}
                     >
-                      {isMediaMsg(replyTo) && !replyTo.is_deleted && (
+                      {isMediaMsg(replyTo) && (
                         <PostImage src={replyTo.content} alt="" className="w-8 h-8 rounded-md object-cover flex-shrink-0" />
                       )}
                       <div className="min-w-0">
@@ -917,9 +930,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                           {replyTo.sender_id === currentUser.id ? 'You' : partnerName}
                         </p>
                         <p className="text-[11px] text-muted-foreground truncate">
-                          {replyTo.is_deleted
-                            ? 'This message was deleted'
-                            : replyTo.message_type === 'sticker' ? 'Sticker'
+                          {replyTo.message_type === 'sticker' ? 'Sticker'
                             : replyTo.message_type === 'gif' ? 'GIF'
                             : replyTo.content}
                         </p>
@@ -930,24 +941,29 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                   {/* Sticker / GIF */}
                   {isMediaMsg(msg) && !msg.is_deleted ? (
                     <>
-                      <motion.div
-                        className={`relative max-w-[220px] rounded-2xl overflow-hidden ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
-                        style={{ cursor: 'pointer', userSelect: 'none', boxShadow: isActive ? '0 8px 24px rgba(0,0,0,0.35)' : 'none' }}
-                        animate={{ scale: isActive ? 1.04 : 1 }}
-                        transition={{ type: 'spring', damping: 20, stiffness: 400 }}
-                        onClick={() => {
-                          if (longPressActivated.current) { longPressActivated.current = false; return; }
-                          if (isActive) { closeActionOverlay(); return; }
-                          setStickerPreview(msg);
-                        }}
-                      >
-                        <PostImage
-                          src={msg.content}
-                          alt={msg.message_type}
-                          className="w-full"
-                          style={{ maxHeight: msg.message_type === 'sticker' ? 120 : 160, objectFit: 'cover', display: 'block' }}
-                          loading="lazy"
-                        />
+                      {/* Chevron + dropdown live in a plain (non-clipping) wrapper — the image's
+                          own overflow-hidden (for rounded corners) would otherwise clip the
+                          dropdown, since it's positioned just below the image's bottom edge. */}
+                      <div className="relative max-w-[220px]">
+                        <motion.div
+                          className={`relative rounded-2xl overflow-hidden ${isMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
+                          style={{ cursor: 'pointer', userSelect: 'none', boxShadow: isActive ? '0 8px 24px rgba(0,0,0,0.35)' : 'none' }}
+                          animate={{ scale: isActive ? 1.04 : 1 }}
+                          transition={{ type: 'spring', damping: 20, stiffness: 400 }}
+                          onClick={() => {
+                            if (longPressActivated.current) { longPressActivated.current = false; return; }
+                            if (isActive) { closeActionOverlay(); return; }
+                            setStickerPreview(msg);
+                          }}
+                        >
+                          <PostImage
+                            src={msg.content}
+                            alt={msg.message_type}
+                            className="w-full"
+                            style={{ maxHeight: msg.message_type === 'sticker' ? 120 : 160, objectFit: 'cover', display: 'block' }}
+                            loading="lazy"
+                          />
+                        </motion.div>
                         {canAct && (
                           <button
                             onClick={e => { e.stopPropagation(); setChevronMenuMsgId(prev => prev === msg.id ? null : msg.id); }}
@@ -976,7 +992,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                             ))}
                           </div>
                         )}
-                      </motion.div>
+                      </div>
                       {isMe && (
                         <div className="flex items-center justify-end gap-0.5 mt-0.5 px-0.5">
                           <Check size={9} strokeWidth={3} style={{ color: 'hsl(var(--muted-foreground))', opacity: isRead ? 0.85 : 0.4 }} />
