@@ -1408,17 +1408,18 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
               </Suspense>
             )}
           </AnimatePresence>
-          {/* Tracks BottomNav's own visibility: parked just above it (BottomNav is h-16
-              plus its own safe-area-inset-bottom padding — matched exactly here rather
-              than guessed, which would undershoot on a large inset/notch/home-indicator
-              and let BottomNav overlap the send button) while it's shown, and settling
-              down near the true screen edge with a little breathing room once it hides. */}
+          {/* Tracks BottomNav's own visibility: parked just above it with a small gap
+              (BottomNav is h-16 plus its own safe-area-inset-bottom padding — matched
+              exactly here rather than guessed, which would undershoot on a large
+              inset/notch/home-indicator and let BottomNav overlap the send button) while
+              it's shown, and settling down near the true screen edge with a little
+              breathing room once it hides. */}
           <div
             className="flex items-center gap-2 px-4 py-3"
             style={{
               paddingBottom: navHidden
                 ? 'calc(0.75rem + env(safe-area-inset-bottom, 8px))'
-                : 'calc(4rem + env(safe-area-inset-bottom, 8px))',
+                : 'calc(4rem + env(safe-area-inset-bottom, 8px) + 0.75rem)',
               transition: 'padding-bottom 0.25s ease',
             }}
           >
