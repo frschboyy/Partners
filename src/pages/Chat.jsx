@@ -158,6 +158,24 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     return () => { partnershipUnsub(); msgUnsub(); };
   }, [currentUser]);
 
+  // "Delete for Me" persists to chat_message_hidden — this global (not per-partnership)
+  // subscription is what lets it sync in real time to your other logged-in devices,
+  // regardless of which conversation they currently have open.
+  useEffect(() => {
+    if (!currentUser) return;
+    const channel = supabase
+      .channel(`chat-hidden-${currentUser.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'chat_message_hidden', filter: `user_id=eq.${currentUser.id}` },
+        payload => {
+          setHiddenMsgIds(prev => new Set([...prev, payload.new.message_id]));
+        }
+      )
+      .subscribe();
+    return () => supabase.removeChannel(channel);
+  }, [currentUser]);
+
   useEffect(() => {
     Object.values(typingChannelsRef.current).forEach(ch => supabase.removeChannel(ch));
     typingChannelsRef.current = {};
@@ -388,6 +406,21 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
       // reverse to chronological order — realtime inserts below assume ascending order.
       const msgs = await api.entities.ChatMessage.filter({ partnership_id: partnershipId }, '-created_at', 100);
       setMessages(msgs.slice().reverse());
+
+      // Pull in anything already hidden-for-me on another device/session — union
+      // rather than replace, so a hide that hasn't finished persisting yet (e.g.
+      // triggered moments ago on this same device) isn't dropped by this fetch.
+      if (msgs.length) {
+        const { data: hiddenRows } = await supabase
+          .from('chat_message_hidden')
+          .select('message_id')
+          .eq('user_id', currentUser.id)
+          .in('message_id', msgs.map(m => m.id));
+        if (hiddenRows?.length) {
+          setHiddenMsgIds(prev => new Set([...prev, ...hiddenRows.map(r => r.message_id)]));
+        }
+      }
+
       await supabase
         .from('partnership_read_positions')
         .upsert(
@@ -493,9 +526,19 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     setTimeout(() => setCopiedFeedback(false), 1800);
   }
 
-  function deleteForMe(msg) {
+  async function deleteForMe(msg) {
     setHiddenMsgIds(prev => new Set([...prev, msg.id]));
     closeActionOverlay();
+    try {
+      const { error } = await supabase
+        .from('chat_message_hidden')
+        .upsert({ message_id: msg.id, user_id: currentUser.id }, { onConflict: 'message_id,user_id', ignoreDuplicates: true });
+      if (error) throw error;
+    } catch (err) {
+      // Already hidden locally for this session either way — just won't have
+      // synced to other devices, and won't survive a reload here either.
+      console.error('Failed to persist delete-for-me:', err);
+    }
   }
 
   async function addStickerToMineWeb(url) {
@@ -557,14 +600,16 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     setSelectedMessageId(null);
     // Optimistic: don't wait on the realtime round-trip to reflect the deletion
     // for the person who just triggered it — the other party still gets it via
-    // the postgres_changes subscription like any other update.
-    setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, is_deleted: true } : m));
+    // the postgres_changes subscription like any other update. Reactions go away
+    // with the message (mirrors the server-side soft_delete_chat_message RPC).
+    const priorReactions = msg.reactions || [];
+    setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, is_deleted: true, reactions: [] } : m));
     try {
       const { error } = await supabase.rpc('soft_delete_chat_message', { p_message_id: msg.id });
       if (error) throw error;
     } catch (err) {
       console.error('Failed to delete message:', err);
-      setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, is_deleted: false } : m));
+      setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, is_deleted: false, reactions: priorReactions } : m));
       const msg2 = err?.message?.includes('window')
         ? "Too late to delete this for everyone — it's outside the 30-minute window."
         : 'Failed to delete — please try again';
@@ -765,30 +810,34 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                 style={{ background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(2px)', WebkitBackdropFilter: 'blur(2px)' }}
                 onClick={closeActionOverlay}
               />
-              <motion.div
-                initial={{ opacity: 0, scale: 0.85, y: overlayLayout.placement === 'below' ? 6 : -6 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.85, y: overlayLayout.placement === 'below' ? 6 : -6 }}
-                transition={{ type: 'spring', damping: 22, stiffness: 420 }}
-                className="fixed z-50 flex items-center gap-0.5 px-2 py-1.5 rounded-full shadow-2xl"
-                style={{ top: overlayLayout.reactionTop, ...overlaySide, background: 'hsl(var(--popover))' }}
-              >
-                {REACTION_EMOJIS.map(emoji => (
-                  <button
-                    key={emoji}
-                    onClick={() => toggleMessageReaction(activeMsg, emoji)}
-                    className="w-8 h-8 flex items-center justify-center text-lg rounded-full hover:bg-secondary transition-transform active:scale-90"
-                  >
-                    {emoji}
-                  </button>
-                ))}
-                <button
-                  onClick={() => setShowReactionPicker(true)}
-                  className="w-8 h-8 flex items-center justify-center rounded-full bg-secondary text-muted-foreground hover:opacity-80 transition-opacity flex-shrink-0"
+              {/* A message deleted for everyone has nothing left to react to — only
+                  "Delete for Me" remains in the menu below, so skip the reaction bar. */}
+              {!activeMsg.is_deleted && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.85, y: overlayLayout.placement === 'below' ? 6 : -6 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.85, y: overlayLayout.placement === 'below' ? 6 : -6 }}
+                  transition={{ type: 'spring', damping: 22, stiffness: 420 }}
+                  className="fixed z-50 flex items-center gap-0.5 px-2 py-1.5 rounded-full shadow-2xl"
+                  style={{ top: overlayLayout.reactionTop, ...overlaySide, background: 'hsl(var(--popover))' }}
                 >
-                  <Plus size={15} />
-                </button>
-              </motion.div>
+                  {REACTION_EMOJIS.map(emoji => (
+                    <button
+                      key={emoji}
+                      onClick={() => toggleMessageReaction(activeMsg, emoji)}
+                      className="w-8 h-8 flex items-center justify-center text-lg rounded-full hover:bg-secondary transition-transform active:scale-90"
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setShowReactionPicker(true)}
+                    className="w-8 h-8 flex items-center justify-center rounded-full bg-secondary text-muted-foreground hover:opacity-80 transition-opacity flex-shrink-0"
+                  >
+                    <Plus size={15} />
+                  </button>
+                </motion.div>
+              )}
               <motion.div
                 initial={{ opacity: 0, scale: 0.92 }}
                 animate={{ opacity: 1, scale: 1 }}
@@ -1121,7 +1170,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                   )}
 
                   {/* Reaction summary */}
-                  {reactionEntries.length > 0 && (
+                  {reactionEntries.length > 0 && !msg.is_deleted && (
                     <div
                       className="flex items-center gap-1 px-2 py-0.5 rounded-full mt-1 text-xs shadow"
                       style={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))' }}
