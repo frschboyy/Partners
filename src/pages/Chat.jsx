@@ -2,9 +2,11 @@ import React, { useState, useEffect, useRef, lazy, Suspense, useCallback } from 
 import { api, supabase } from '@/api/supabaseClient';
 import { motion, AnimatePresence } from 'framer-motion';
 import Avatar from '@/components/Avatar';
+import PostImage from '@/components/PostImage';
 const ChatPicker = lazy(() => import('@/components/ChatPicker'));
 import { Send, ArrowLeft, Pencil, Trash2, Check, X as XIcon, Smile, Star, CornerUpLeft, Copy, MoreVertical } from 'lucide-react';
 import { haptic } from '@/lib/haptic';
+import { useToast, Toast } from '@/components/Toast';
 
 function formatTime(dateStr) {
   if (!dateStr) return '';
@@ -48,6 +50,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
   const [copiedFeedback, setCopiedFeedback] = useState(false);
   const [typingPartners, setTypingPartners] = useState({});
   const [showPicker, setShowPicker] = useState(false);
+  const { message: toastMessage, variant: toastVariant, show: showToast } = useToast();
   const bottomRef = useRef(null);
   const pickerRef = useRef(null);
   const selectedPartnershipRef = useRef(null);
@@ -268,8 +271,10 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
   async function loadMessages(partnershipId, partnerUserId) {
     setLoadingMessages(true);
     try {
-      const msgs = await api.entities.ChatMessage.filter({ partnership_id: partnershipId }, 'created_at', 100);
-      setMessages(msgs);
+      // Fetch newest-first so the 100-row limit captures recent history, then
+      // reverse to chronological order — realtime inserts below assume ascending order.
+      const msgs = await api.entities.ChatMessage.filter({ partnership_id: partnershipId }, '-created_at', 100);
+      setMessages(msgs.slice().reverse());
       await supabase
         .from('partnership_read_positions')
         .upsert(
@@ -354,6 +359,18 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
       : [...mineFilenames].find(n => n.endsWith('_' + raw) || raw.endsWith('_' + n));
     if (!match) { setStickerPreview(null); return; }
     try {
+      // This file's public URL is embedded directly in any chat message that ever sent
+      // it (including this one) — deleting it breaks it in every conversation it was
+      // used in, forever. Block it if it's actually referenced by a message.
+      const { count, error: checkError } = await supabase
+        .from('chat_messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('content', url);
+      if (checkError) throw checkError;
+      if (count > 0) {
+        window.alert(`This sticker has been sent in ${count} chat message${count === 1 ? '' : 's'} — deleting it would break it in those conversations, so it can't be removed.`);
+        return;
+      }
       await supabase.storage.from('uploads').remove([`stickers/${currentUser.id}/${match}`]);
       setMineFilenames(prev => { const s = new Set(prev); s.delete(match); return s; });
       setStickerPreview(null);
@@ -435,16 +452,22 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
   async function sendMedia(previewUrl, fullUrl, type) {
     if (!selectedPartnership) return;
     setShowPicker(false);
-    const replyId = replyingTo?.id || null;
+    const replySnapshot = replyingTo;
     setReplyingTo(null);
-    await api.entities.ChatMessage.create({
-      partnership_id: selectedPartnership.id,
-      sender_id: currentUser.id,
-      sender_name: profile?.display_name || currentUser.full_name,
-      content: fullUrl || previewUrl,
-      message_type: type,
-      reply_to_id: replyId,
-    });
+    try {
+      await api.entities.ChatMessage.create({
+        partnership_id: selectedPartnership.id,
+        sender_id: currentUser.id,
+        sender_name: profile?.display_name || currentUser.full_name,
+        content: fullUrl || previewUrl,
+        message_type: type,
+        reply_to_id: replySnapshot?.id || null,
+      });
+    } catch (err) {
+      setReplyingTo(replySnapshot); // restore so the user doesn't lose their reply context
+      console.error('Failed to send media message:', err);
+      showToast('Failed to send — please try again', 'error');
+    }
   }
 
   async function sendMessage() {
@@ -452,7 +475,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     haptic([10]);
     setSending(true);
     const content = text.trim();
-    const replyId = replyingTo?.id || null;
+    const replySnapshot = replyingTo;
     setText('');
     setReplyingTo(null);
     clearTimeout(typingThrottleRef.current);
@@ -465,7 +488,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
         sender_name: profile?.display_name || currentUser.full_name,
         content,
         message_type: 'text',
-        reply_to_id: replyId,
+        reply_to_id: replySnapshot?.id || null,
       });
       // Only add if not already added by the subscription (dedupe by id)
       setMessages(prev => {
@@ -475,7 +498,9 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
       });
     } catch (err) {
       setText(content); // restore text so user doesn't lose their message
+      setReplyingTo(replySnapshot); // restore so the user doesn't lose their reply context
       console.error('Failed to send message:', err);
+      showToast('Failed to send — please try again', 'error');
     }
     setSending(false);
   }
@@ -492,7 +517,8 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
     const partnerProfile = partnerProfiles[partnerId];
 
     return (
-      <div className="flex flex-col h-full bg-background">
+      <div className="flex flex-col h-full bg-background" data-no-swipe-nav>
+        <Toast message={toastMessage} variant={toastVariant} />
         {stickerSavedMsg && (
           <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 px-4 py-2 rounded-full bg-yellow-500/20 border border-yellow-500/30 text-yellow-600 dark:text-yellow-400 text-sm font-semibold shadow-lg pointer-events-none">
             <Star size={13} /> Saved to Mine!
@@ -704,7 +730,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                         setStickerPreview(msg);
                       }}
                     >
-                      <img
+                      <PostImage
                         src={msg.content}
                         alt={msg.message_type}
                         className="w-full"

@@ -4,6 +4,7 @@ import { api, supabase } from '@/api/supabaseClient';
 import { motion, AnimatePresence } from 'framer-motion';
 import { compressImage } from '@/lib/imageUtils';
 import { useToast, Toast } from '@/components/Toast';
+import PostImage from '@/components/PostImage';
 
 const POST_TYPES = [
   { id: 'meal', label: '🍽️ Meal', desc: 'Log what you ate' },
@@ -103,7 +104,7 @@ export default function LogPostModal({ currentUser, profile, rules = [], partner
       }
 
       const cleaned = await api.integrations.Core.InvokeLLM({
-        prompt: `Clean up this voice transcription into a clear, concise description. Remove filler words, fix grammar, make it natural. Return ONLY the cleaned text, nothing else.\n\nTranscription: "${transcript}"`,
+        prompt: `Lightly clean up this voice transcription. Remove filler words (um, uh, like, you know) and fix obvious transcription errors only. Preserve the speaker's exact wording, phrasing, sentence structure, and tone as closely as possible — do not rephrase, formalize, or rewrite it. Return ONLY the cleaned text, nothing else.\n\nTranscription: "${transcript}"`,
       });
 
       clearTimeout(transcribeTimeoutRef.current);
@@ -122,7 +123,13 @@ export default function LogPostModal({ currentUser, profile, rules = [], partner
     setUploading(true);
     setPhotoError('');
     try {
-      const compressed = await Promise.all(files.map(f => compressImage(f)));
+      // Compress one at a time — compressing several large camera photos in parallel
+      // (common on Android when batch-selecting from the gallery) can spike memory
+      // enough to corrupt a canvas decode on lower-end devices.
+      const compressed = [];
+      for (const f of files) {
+        compressed.push(await compressImage(f));
+      }
       const uploads = await Promise.all(
         compressed.map(file => api.integrations.Core.UploadFile({ file }))
       );
@@ -138,6 +145,55 @@ export default function LogPostModal({ currentUser, profile, rules = [], partner
 
   function removePhoto(idx) {
     setPhotoUrls(prev => prev.filter((_, i) => i !== idx));
+  }
+
+  function renderVoiceInput() {
+    return (
+      <>
+        <div className="flex items-center gap-2 flex-wrap">
+          {transcribing ? (
+            <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent-muted text-xs font-semibold text-muted-foreground">
+              <span className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin inline-block" />
+              Transcribing… (up to 15s)
+            </span>
+          ) : recording ? (
+            <motion.button
+              type="button"
+              whileTap={{ scale: 0.9 }}
+              onClick={stopRecording}
+              animate={{ scale: [1, 1.04, 1] }}
+              transition={{ repeat: Infinity, duration: 0.8 }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-destructive text-destructive-foreground text-xs font-semibold"
+            >
+              <MicOff size={13} /> Stop recording
+            </motion.button>
+          ) : (
+            <button
+              type="button"
+              onClick={startRecording}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary text-muted-foreground text-xs font-semibold transition-colors hover:text-foreground"
+            >
+              <Mic size={13} /> Describe with voice
+            </button>
+          )}
+          {caption && !transcribing && !recording && (
+            <button
+              type="button"
+              onClick={() => { setCaption(''); setVoiceError(''); }}
+              className="text-xs text-muted-foreground flex items-center gap-1"
+            >
+              <RefreshCw size={11} /> Clear
+            </button>
+          )}
+        </div>
+
+        {voiceError && (
+          <p className="text-xs text-destructive flex items-center gap-1">
+            <AlertCircle size={11} /> {voiceError}
+          </p>
+        )}
+      </>
+    );
   }
 
   const canSubmit = !saving && photoUrls.length > 0;
@@ -244,50 +300,7 @@ export default function LogPostModal({ currentUser, profile, rules = [], partner
                 />
 
                 {/* Voice-to-text — labelled so it's discoverable */}
-                {postType === 'meal' && (
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {transcribing ? (
-                      <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent-muted text-xs font-semibold text-muted-foreground">
-                        <span className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin inline-block" />
-                        Transcribing… (up to 15s)
-                      </span>
-                    ) : recording ? (
-                      <motion.button
-                        type="button"
-                        whileTap={{ scale: 0.9 }}
-                        onClick={stopRecording}
-                        animate={{ scale: [1, 1.04, 1] }}
-                        transition={{ repeat: Infinity, duration: 0.8 }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-destructive text-destructive-foreground text-xs font-semibold"
-                      >
-                        <MicOff size={13} /> Stop recording
-                      </motion.button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={startRecording}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary text-muted-foreground text-xs font-semibold transition-colors hover:text-foreground"
-                      >
-                        <Mic size={13} /> Describe with voice
-                      </button>
-                    )}
-                    {caption && !transcribing && !recording && (
-                      <button
-                        type="button"
-                        onClick={() => { setCaption(''); setVoiceError(''); }}
-                        className="text-xs text-muted-foreground flex items-center gap-1"
-                      >
-                        <RefreshCw size={11} /> Clear
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                {voiceError && (
-                  <p className="text-xs text-destructive flex items-center gap-1">
-                    <AlertCircle size={11} /> {voiceError}
-                  </p>
-                )}
+                {renderVoiceInput()}
               </div>
             )}
 
@@ -313,8 +326,8 @@ export default function LogPostModal({ currentUser, profile, rules = [], partner
                     onChange={e => setWorkoutDuration(e.target.value)}
                   />
                 </div>
-                <div>
-                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Notes (optional)</label>
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">Notes (optional)</label>
                   <textarea
                     className="w-full bg-input border border-border rounded-lg px-3 py-2.5 text-sm text-foreground resize-none"
                     rows={2}
@@ -322,6 +335,7 @@ export default function LogPostModal({ currentUser, profile, rules = [], partner
                     value={caption}
                     onChange={e => setCaption(e.target.value)}
                   />
+                  {renderVoiceInput()}
                 </div>
               </>
             )}
@@ -339,7 +353,7 @@ export default function LogPostModal({ currentUser, profile, rules = [], partner
                   <div className="grid grid-cols-3 gap-2 mb-2">
                     {photoUrls.map((url, idx) => (
                       <div key={idx} className="relative aspect-square rounded-lg overflow-hidden bg-secondary">
-                        <img src={url} alt={`photo ${idx + 1}`} className="w-full h-full object-cover" />
+                        <PostImage src={url} alt={`photo ${idx + 1}`} className="w-full h-full object-cover" />
                         <button
                           type="button"
                           onClick={() => removePhoto(idx)}

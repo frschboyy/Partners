@@ -3,6 +3,7 @@ import { MessageCircle, ChevronLeft, ChevronRight, Smile, Pencil, Trash2, X, Plu
 import { motion, AnimatePresence, useMotionValue, animate } from 'framer-motion';
 import { api } from '@/api/supabaseClient';
 import Avatar from '@/components/Avatar';
+import PostImage from '@/components/PostImage';
 import { compressImage } from '@/lib/imageUtils';
 import { useToast, Toast } from '@/components/Toast';
 import CommentsSheet from '@/components/CommentsSheet';
@@ -207,7 +208,7 @@ export default function FeedPost({
             {photoUrls.map((url, i) => (
               <div key={i} style={{ width: cardW(), flexShrink: 0, height: '100%' }}>
                 {url ? (
-                  <img src={url} alt="" className="w-full h-full object-cover" loading="eager" decoding="async" />
+                  <PostImage src={url} alt="" className="w-full h-full object-cover" loading="eager" decoding="async" />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center" style={{ background: 'linear-gradient(135deg, hsl(var(--theme-accent-muted)), hsl(var(--card)))' }}>
                     <span className="text-8xl opacity-30">{POST_TYPE_EMOJI[post.post_type] || '✨'}</span>
@@ -218,7 +219,7 @@ export default function FeedPost({
           </motion.div>
         ) : (
           photoUrls[0] ? (
-            <img src={photoUrls[0]} alt="post" className="w-full h-full object-cover" loading="eager" decoding="async" fetchPriority="high" />
+            <PostImage src={photoUrls[0]} alt="post" className="w-full h-full object-cover" loading="eager" decoding="async" fetchPriority="high" />
           ) : (
             <div className="w-full h-full flex items-center justify-center" style={{ background: 'linear-gradient(135deg, hsl(var(--theme-accent-muted)), hsl(var(--card)))' }}>
               <span className="text-8xl opacity-30">{POST_TYPE_EMOJI[post.post_type] || '✨'}</span>
@@ -406,7 +407,7 @@ export default function FeedPost({
                       onClick={() => setEditSelectedIndex(prev => prev === i ? null : i)}
                     >
                       {url ? (
-                        <img src={url} alt="" className="w-full h-full object-cover" />
+                        <PostImage src={url} alt="" className="w-full h-full object-cover" />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-3xl">{POST_TYPE_EMOJI[post.post_type] || '✨'}</div>
                       )}
@@ -542,7 +543,7 @@ export default function FeedPost({
                       onClick={() => setGridFocusPost(p)}
                     >
                       {p.photo_url ? (
-                        <img src={p.photo_url} alt="thumb" className="w-full h-full object-cover" loading="lazy" decoding="async" />
+                        <PostImage src={p.photo_url} alt="thumb" className="w-full h-full object-cover" loading="lazy" decoding="async" />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-2xl">
                           {POST_TYPE_EMOJI[p.post_type] || '✨'}
@@ -586,7 +587,7 @@ function GridFocusedPost({ p, onComments }) {
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex-1 relative overflow-hidden">
         {p.photo_url ? (
-          <img src={p.photo_url} alt="post" className="w-full h-full object-contain bg-black" loading="lazy" decoding="async" />
+          <PostImage src={p.photo_url} alt="post" className="w-full h-full object-contain bg-black" loading="lazy" decoding="async" />
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center gap-3 p-6"
             style={{ background: 'linear-gradient(135deg, hsl(var(--theme-accent-muted)), hsl(var(--card)))' }}>

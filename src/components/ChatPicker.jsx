@@ -103,8 +103,20 @@ function MyStickersTab({ currentUser, onSelect }) {
     e.target.value = '';
   }
 
-  async function handleDelete(name) {
+  async function handleDelete(name, url) {
     try {
+      // This file's public URL is embedded directly in any chat message that ever
+      // sent it — deleting it out from under those messages leaves a broken image
+      // in chat history for both sides, forever. Block it if it's actually in use.
+      const { count, error: checkError } = await supabase
+        .from('chat_messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('content', url);
+      if (checkError) throw checkError;
+      if (count > 0) {
+        window.alert(`This sticker has been sent in ${count} chat message${count === 1 ? '' : 's'} — deleting it would break it in those conversations, so it can't be removed.`);
+        return;
+      }
       await supabase.storage.from('uploads').remove([`${folder}/${name}`]);
       setStickers(prev => prev.filter(s => s.name !== name));
     } catch {}
@@ -160,7 +172,7 @@ function MyStickersTab({ currentUser, onSelect }) {
                   <img src={s.url} alt="" className="w-full h-full object-contain p-1" loading="lazy" />
                 </button>
                 <button
-                  onClick={e => { e.stopPropagation(); handleDelete(s.name); }}
+                  onClick={e => { e.stopPropagation(); handleDelete(s.name, s.url); }}
                   className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white text-xs flex items-center justify-center leading-none opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity hover:bg-black/80"
                   title="Remove sticker"
                 >

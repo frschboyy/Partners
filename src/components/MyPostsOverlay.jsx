@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { X, ChevronLeft, ChevronRight, Pencil, Trash2, Smile, Plus, ArrowUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '@/api/supabaseClient';
+import PostImage from '@/components/PostImage';
 import { compressImage } from '@/lib/imageUtils';
 import { useToast, Toast } from '@/components/Toast';
 import CommentsSheet from '@/components/CommentsSheet';
@@ -256,7 +257,7 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
                   >
                     {focusedPhotoUrls.map((url, i) => (
                       <div key={i} style={{ width: `${100 / focusedPhotoUrls.length}%`, flexShrink: 0, height: '100%' }}>
-                        <img src={url} alt="post" className="w-full h-full object-contain" />
+                        <PostImage src={url} alt="post" className="w-full h-full object-contain" />
                       </div>
                     ))}
                   </div>
@@ -389,7 +390,7 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
                               className="relative aspect-square rounded-lg overflow-hidden bg-secondary cursor-pointer"
                               onClick={() => setEditSelectedIndex(prev => prev === i ? null : i)}
                             >
-                              <img src={url} alt="" className="w-full h-full object-cover" />
+                              <PostImage src={url} alt="" className="w-full h-full object-cover" />
                               <AnimatePresence>
                                 {editSelectedIndex === i && (
                                   <motion.div
@@ -508,7 +509,7 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
                       onClick={() => openPost(p)}
                     >
                       {p.photo_url ? (
-                        <img src={p.photo_url} alt="thumb" className="w-full h-full object-cover" loading="lazy" decoding="async" />
+                        <PostImage src={p.photo_url} alt="thumb" className="w-full h-full object-cover" loading="lazy" decoding="async" />
                       ) : (
                         <div
                           className="w-full h-full flex items-center justify-center text-2xl"
