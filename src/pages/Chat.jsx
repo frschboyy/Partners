@@ -501,11 +501,12 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
       // Fetch newest-first so the 100-row limit captures recent history, then
       // reverse to chronological order — realtime inserts below assume ascending order.
       const msgs = await api.entities.ChatMessage.filter({ partnership_id: partnershipId }, '-created_at', 100);
-      setMessages(msgs.slice().reverse());
 
-      // Pull in anything already hidden-for-me on another device/session — union
-      // rather than replace, so a hide that hasn't finished persisting yet (e.g.
-      // triggered moments ago on this same device) isn't dropped by this fetch.
+      // Resolve which of these are hidden-for-me BEFORE ever setting messages into
+      // state — setMessages first (with hiddenMsgIds not yet caught up, e.g. right
+      // after a fresh page reload) rendered every deleted-for-me message for a beat
+      // until this follow-up query landed. Doing this first means both state
+      // updates land in the same render, so a hidden message is never painted at all.
       if (msgs.length) {
         const { data: hiddenRows } = await supabase
           .from('chat_message_hidden')
@@ -516,6 +517,8 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
           setHiddenMsgIds(prev => new Set([...prev, ...hiddenRows.map(r => r.message_id)]));
         }
       }
+
+      setMessages(msgs.slice().reverse());
 
       await supabase
         .from('partnership_read_positions')
