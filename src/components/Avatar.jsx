@@ -1,5 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { haptic } from '@/lib/haptic';
+
+const LONG_PRESS_MS = 450;
 
 export default function Avatar({ profile, size = 'md', className = '', onClick, noAutoFlip = false }) {
   const hasPhoto = !!profile?.photo_avatar_url;
@@ -9,6 +12,10 @@ export default function Avatar({ profile, size = 'md', className = '', onClick, 
   // true = front face (photo), false = back face (emoji)
   const [showPhoto, setShowPhoto] = useState(true);
   const [expanded, setExpanded] = useState(false);
+  const longPressTimer = useRef(null);
+  const longPressActivated = useRef(false);
+
+  useEffect(() => () => clearTimeout(longPressTimer.current), []);
 
   const sizes = {
     xs: 'w-8 h-8 text-lg',
@@ -34,8 +41,27 @@ export default function Avatar({ profile, size = 'md', className = '', onClick, 
   }, [expanded]);
 
   function handleClick() {
+    if (longPressActivated.current) { longPressActivated.current = false; return; }
     if (canFlip) setShowPhoto(v => !v);
     onClick?.();
+  }
+
+  // Hold-to-preview: press-and-hold expands the overlay, releasing closes it —
+  // the same long-press-vs-tap disambiguation pattern used for chat messages
+  // (a completed long press suppresses the click that would otherwise follow
+  // and fire the flip/onClick behavior instead).
+  function handlePointerDown() {
+    longPressActivated.current = false;
+    longPressTimer.current = setTimeout(() => {
+      longPressActivated.current = true;
+      haptic([15, 10, 20]);
+      setExpanded(true);
+    }, LONG_PRESS_MS);
+  }
+
+  function handlePointerUp() {
+    clearTimeout(longPressTimer.current);
+    if (longPressActivated.current) setExpanded(false);
   }
 
   const emoji = profile?.emoji_avatar || '😎';
@@ -49,6 +75,10 @@ export default function Avatar({ profile, size = 'md', className = '', onClick, 
           perspective: '600px',
         }}
         onClick={handleClick}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onPointerLeave={handlePointerUp}
         whileTap={canFlip ? { scale: 0.9 } : {}}
         title={canFlip ? 'Tap to flip' : undefined}
       >
