@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '@/api/supabaseClient';
 import { Trophy, Flame, Camera, Dumbbell, Crown, AlertCircle, Users, Banknote } from 'lucide-react';
 import Avatar from '@/components/Avatar';
-import { motion } from 'framer-motion';
-import { useInteractiveSwipe } from '@/lib/useInteractiveSwipe';
+import { motion, AnimatePresence } from 'framer-motion';
 
 const TABS = [
   { id: 'streak',        label: 'Streak',       icon: Flame },
@@ -13,8 +12,6 @@ const TABS = [
   { id: 'partner-slips', label: 'Partner Slips', icon: Users },
   { id: 'balance',       label: 'Ledger',        icon: Banknote },
 ];
-const TAB_ORDER = TABS.map(t => t.id);
-
 function isSlipTab(tab) { return tab === 'self-slips' || tab === 'partner-slips'; }
 function isBalanceTab(tab) { return tab === 'balance'; }
 
@@ -65,7 +62,6 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('streak');
-  const tabBarRef = useRef(null);
 
   const currencyLabel = profile?.currency_label || 'KSH';
 
@@ -227,13 +223,6 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
     setEntries(stats);
     setLoading(false);
   }
-
-  const { containerRef, dragX, neighborX, pending, pushTo } = useInteractiveSwipe({
-    order: TAB_ORDER,
-    activeId: activeTab,
-    onChange: setActiveTab,
-    isBlocked: (e) => !!tabBarRef.current?.contains(e.target),
-  });
 
   function renderTabBody(tab) {
     const slipTab = isSlipTab(tab);
@@ -407,11 +396,11 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
       </div>
 
       {/* Tabs */}
-      <div ref={tabBarRef} className="flex gap-1.5 px-4 mb-4 overflow-x-auto pb-1 scrollbar-none">
+      <div className="flex gap-1.5 px-4 mb-4 overflow-x-auto pb-1 scrollbar-none">
         {TABS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
-            onClick={() => pushTo(id)}
+            onClick={() => setActiveTab(id)}
             className={`flex items-center justify-center gap-1.5 flex-shrink-0 px-3 py-2 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
               activeTab === id ? 'text-primary-foreground' : 'bg-secondary text-muted-foreground'
             }`}
@@ -423,19 +412,24 @@ export default function Leaderboard({ currentUser, profile, onTabChange }) {
         ))}
       </div>
 
-      <div
-        ref={containerRef}
-        className="flex-1 overflow-hidden relative"
-        style={{ touchAction: 'pan-y' }}
-      >
-        <motion.div className="absolute inset-0 flex flex-col" style={{ x: dragX }}>
-          {renderTabBody(activeTab)}
-        </motion.div>
-        {pending && (
-          <motion.div className="absolute inset-0 flex flex-col" style={{ x: neighborX }}>
-            {renderTabBody(pending.id)}
+      {/* Switching categories here is a content swap within the same view, not
+          a navigation — a crossfade communicates that better than the push/slide
+          used for actual page-to-page navigation elsewhere in the app. Both tab
+          bodies are absolutely positioned so they overlap in place with no
+          layout shift while the old one fades out and the new one fades in. */}
+      <div className="flex-1 overflow-hidden relative">
+        <AnimatePresence initial={false}>
+          <motion.div
+            key={activeTab}
+            className="absolute inset-0 flex flex-col"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25, ease: 'easeInOut' }}
+          >
+            {renderTabBody(activeTab)}
           </motion.div>
-        )}
+        </AnimatePresence>
       </div>
     </div>
   );
