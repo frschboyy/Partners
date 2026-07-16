@@ -33,23 +33,17 @@ export default function Avatar({ profile, size = 'md', className = '', onClick, 
     return () => clearInterval(id);
   }, [canFlip, noAutoFlip]);
 
-  // Auto-close expanded overlay
-  useEffect(() => {
-    if (!expanded) return;
-    const t = setTimeout(() => setExpanded(false), 2500);
-    return () => clearTimeout(t);
-  }, [expanded]);
-
   function handleClick() {
     if (longPressActivated.current) { longPressActivated.current = false; return; }
     if (canFlip) setShowPhoto(v => !v);
     onClick?.();
   }
 
-  // Hold-to-preview: press-and-hold expands the overlay, releasing closes it —
-  // the same long-press-vs-tap disambiguation pattern used for chat messages
-  // (a completed long press suppresses the click that would otherwise follow
-  // and fire the flip/onClick behavior instead).
+  // Hold-to-preview: press-and-hold expands the overlay and it stays open —
+  // releasing the hold does nothing by itself; the only way out is tapping
+  // outside it (the backdrop's onClick below). Same long-press-vs-tap
+  // disambiguation pattern used for chat messages: a completed long press
+  // suppresses the click that would otherwise follow and fire flip/onClick.
   function handlePointerDown() {
     longPressActivated.current = false;
     longPressTimer.current = setTimeout(() => {
@@ -61,7 +55,6 @@ export default function Avatar({ profile, size = 'md', className = '', onClick, 
 
   function handlePointerUp() {
     clearTimeout(longPressTimer.current);
-    if (longPressActivated.current) setExpanded(false);
   }
 
   const emoji = profile?.emoji_avatar || '😎';
@@ -128,7 +121,7 @@ export default function Avatar({ profile, size = 'md', className = '', onClick, 
       <AnimatePresence>
         {expanded && (
           <motion.div
-            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70"
+            className="fixed inset-0 z-[200] flex items-center justify-center"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
