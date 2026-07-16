@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { STREAK_MILESTONES } from '@/lib/constants';
 
 const CONFETTI = Array.from({ length: 28 }, (_, i) => ({
   id: i,
@@ -17,6 +18,9 @@ const MILESTONES = {
     title: "You're all set!",
     body: "Your profile is ready. Here's what you configured:",
   },
+  ...Object.fromEntries(
+    STREAK_MILESTONES.map(m => [`streak_${m.days}`, { emoji: m.emoji, title: m.title, body: m.body }])
+  ),
 };
 
 export default function MilestoneModal({ type, onDismiss, summary }) {

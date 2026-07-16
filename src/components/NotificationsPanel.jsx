@@ -28,6 +28,7 @@ function getAction(n) {
     case 'new_message':
       return { label: 'Open chat', tab: 'chat', intent: { action: 'openChat', fromUserId: n.from_user_id } };
     case 'summertides_declared':
+    case 'milestone_reached':
       return { label: 'View feed', tab: 'feed', intent: null };
     default:
       return null;
@@ -167,6 +168,7 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
     balance_settled: '✅',
     balance_denied: '❌',
     partnership_declined: '❌',
+    milestone_reached: '🏆',
   };
 
   const selfIcons = {

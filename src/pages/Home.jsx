@@ -37,7 +37,8 @@ import PartnershipAgreementModal from '@/components/PartnershipAgreementModal';
 import WitnessedSlipModal from '@/components/WitnessedSlipModal';
 import SelfSlipSection from '@/components/SelfSlipSection';
 import CheatGuard from '@/components/CheatGuard';
-import { SUMMERTIDES } from '@/lib/constants';
+import MilestoneModal from '@/components/MilestoneModal';
+import { SUMMERTIDES, STREAK_MILESTONES } from '@/lib/constants';
 
 // Home fully unmounts on tab-away (App.jsx only renders the active tab), so an
 // in-memory cache needs to live outside the component to survive that — a
@@ -103,6 +104,12 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
   const [showGuard, setShowGuard] = useState(false);
   const [guardAnchor, setGuardAnchor] = useState(null);
   const streakCardRef = useRef(null);
+  const [milestoneCelebration, setMilestoneCelebration] = useState(null);
+  const [awardedMilestoneDays, setAwardedMilestoneDays] = useState([]);
+  // Set once the awarded-days query for the current streak epoch resolves —
+  // the celebration-trigger effect stays inert until this matches
+  // timerStartMs, so it never fires off a stale/empty awarded list.
+  const loadedMilestoneEpochRef = useRef(null);
   const [editingStat, setEditingStat] = useState(null); // 'streak' | 'vibe' | null
   const [editValue, setEditValue] = useState('');
   const [removing, setRemoving] = useState(false);
@@ -309,6 +316,83 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
   // hit — false only for the genuine "nothing to show yet" first render.
   const pageReady = hasLoadedOnceRef.current || !loading;
 
+  // `now` ticks every second so timerStart is a fresh Date object each
+  // render — comparing it directly in a dependency array would refire these
+  // effects every tick. Its underlying value only changes when the streak
+  // actually resets, so that's what the effects key off instead.
+  const timerStartMs = timerStart ? timerStart.getTime() : null;
+
+  // Fetch which thresholds are already awarded for *this* streak epoch
+  // whenever the epoch changes (mount, or a slip resets timerStart).
+  useEffect(() => {
+    if (!currentUser || !timerStartMs) return;
+    loadedMilestoneEpochRef.current = null;
+    supabase
+      .from('milestones_awarded')
+      .select('days')
+      .eq('user_id', currentUser.id)
+      .eq('streak_started_at', new Date(timerStartMs).toISOString())
+      .then(({ data }) => {
+        setAwardedMilestoneDays((data || []).map(r => r.days));
+        loadedMilestoneEpochRef.current = timerStartMs;
+      });
+  }, [currentUser, timerStartMs]);
+
+  // Fires the celebration the moment the live streak crosses an unawarded
+  // threshold. Waits on the fetch above so it never re-awards something
+  // that was already earned in a prior session.
+  useEffect(() => {
+    if (loadedMilestoneEpochRef.current !== timerStartMs) return;
+    const next = STREAK_MILESTONES.find(m => overallStreak >= m.days && !awardedMilestoneDays.includes(m.days));
+    if (!next) return;
+    setAwardedMilestoneDays(prev => [...prev, next.days]);
+    awardMilestone(next.days, timerStartMs);
+  }, [overallStreak, awardedMilestoneDays, timerStartMs]);
+
+  async function awardMilestone(days, epochMs) {
+    const milestone = STREAK_MILESTONES.find(m => m.days === days);
+    if (!milestone) return;
+    const { error } = await supabase.from('milestones_awarded').insert({
+      user_id: currentUser.id,
+      days,
+      streak_started_at: new Date(epochMs).toISOString(),
+    });
+    // Unique-constraint conflict means another session already awarded this
+    // one first (e.g. two tabs open) — don't double-celebrate.
+    if (error) return;
+
+    setMilestoneCelebration(`streak_${days}`);
+
+    if (activePartners.length === 0) return;
+    const name = profile?.display_name || currentUser.full_name;
+    const partnerIds = activePartners.map(p => p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id);
+
+    await api.entities.Post.create({
+      user_id: currentUser.id,
+      author_name: name,
+      author_emoji: profile?.emoji_avatar || '😎',
+      post_type: 'milestone',
+      caption: `${milestone.title} — ${days} days without a slip! ${milestone.emoji}`,
+      photo_url: '',
+      photo_urls: [],
+      post_date: new Date().toISOString().split('T')[0],
+      visible_to: [currentUser.id, ...partnerIds],
+      reactions: [],
+    });
+
+    await Promise.all(partnerIds.map(partnerId =>
+      supabase.from('notifications').insert({
+        user_id: partnerId,
+        type: 'milestone_reached',
+        title: `${name} hit a milestone! ${milestone.emoji}`,
+        body: `${name} just reached ${days} days without a slip — ${milestone.title}.`,
+        from_user_id: currentUser.id,
+        from_user_name: name,
+        read: false,
+      })
+    ));
+  }
+
   return (
     <div className="flex flex-col min-h-screen bg-background pb-24">
       <Toast message={homeToastMsg} variant={homeToastVariant} position="top" />
@@ -388,6 +472,12 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
         </div>
 
         <CheatGuard visible={showGuard} anchor={guardAnchor} onDone={() => setShowGuard(false)} />
+
+        <AnimatePresence>
+          {milestoneCelebration && (
+            <MilestoneModal type={milestoneCelebration} onDismiss={() => setMilestoneCelebration(null)} />
+          )}
+        </AnimatePresence>
 
         {/* Summertides */}
         {isSummertidesWindow && !summertidesDecl && (
