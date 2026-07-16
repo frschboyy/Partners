@@ -50,6 +50,11 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
   const [showLogPost, setShowLogPost] = useState(false);
   const [showMyPosts, setShowMyPosts] = useState(false);
   const [myPosts, setMyPosts] = useState([]);
+  // Starts true (not false) so the overlay's own "no posts yet" empty state
+  // never has a chance to render before the first load resolves — myPosts is
+  // seeded empty on every page load, which read as a real "you have zero
+  // posts" result for the brief moment before loadMyPosts() actually returned.
+  const [loadingMyPosts, setLoadingMyPosts] = useState(true);
   const [showAgreement, setShowAgreement] = useState(null);
   const [reportSlip, setReportSlip] = useState(null);
   const [removePartner, setRemovePartner] = useState(null);
@@ -161,12 +166,14 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
   }
 
   async function loadMyPosts() {
+    setLoadingMyPosts(true);
     try {
       const posts = await api.entities.Post.filter({ user_id: currentUser.id }, '-created_at', 50);
       setMyPosts(posts);
     } catch (err) {
       console.error('Failed to load posts:', err?.message || err);
     }
+    setLoadingMyPosts(false);
   }
 
   async function confirmRemove() {
@@ -608,6 +615,7 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
         {showMyPosts && (
           <MyPostsOverlay
             posts={myPosts}
+            loading={loadingMyPosts}
             profile={profile}
             currentUserId={currentUser.id}
             onClose={() => setShowMyPosts(false)}

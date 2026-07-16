@@ -9,7 +9,7 @@ import CommentsSheet from '@/components/CommentsSheet';
 import { EMOJI_REACTIONS, POST_TYPE_EMOJI } from '@/lib/constants';
 import { usePostReactions } from '@/lib/usePostReactions';
 
-export default function MyPostsOverlay({ posts, profile, currentUserId, profiles = {}, onClose, onRefresh, onCreatePost }) {
+export default function MyPostsOverlay({ posts, loading = false, profile, currentUserId, profiles = {}, onClose, onRefresh, onCreatePost }) {
   const [focusedPost, setFocusedPost] = useState(null);
   const [imageIndex, setImageIndex] = useState(0);
 
@@ -473,7 +473,13 @@ export default function MyPostsOverlay({ posts, profile, currentUserId, profiles
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
             >
-              {posts.length === 0 ? (
+              {loading ? (
+                <div className="grid grid-cols-3 gap-1.5">
+                  {[1, 2, 3, 4, 5, 6].map(i => (
+                    <div key={i} className="aspect-square rounded-lg bg-secondary animate-pulse" />
+                  ))}
+                </div>
+              ) : posts.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-64 gap-4 text-center px-6">
                   <p className="text-3xl">📝</p>
                   <div className="space-y-1">
