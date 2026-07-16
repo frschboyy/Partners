@@ -101,6 +101,8 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
   const [reportSlip, setReportSlip] = useState(null);
   const [removePartner, setRemovePartner] = useState(null);
   const [showGuard, setShowGuard] = useState(false);
+  const [guardAnchor, setGuardAnchor] = useState(null);
+  const streakCardRef = useRef(null);
   const [editingStat, setEditingStat] = useState(null); // 'streak' | 'vibe' | null
   const [editValue, setEditValue] = useState('');
   const [removing, setRemoving] = useState(false);
@@ -328,7 +330,7 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
         {/* Stats strip */}
         <div className="grid grid-cols-2 gap-3">
           {/* Streak + live timer */}
-          <div className="card-brutal p-3 flex flex-col items-center gap-0.5">
+          <div ref={streakCardRef} className="card-brutal p-3 flex flex-col items-center gap-0.5">
             <div className="flex items-baseline gap-1">
               <Flame size={15} style={{ color: 'hsl(var(--theme-accent))' }} />
               {editingStat === 'streak' ? (
@@ -341,7 +343,10 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
                   onChange={e => setEditValue(e.target.value)}
                   onBlur={() => {
                     setEditingStat(null);
-                    if (parseInt(editValue, 10) !== overallStreak) setShowGuard(true);
+                    if (parseInt(editValue, 10) !== overallStreak) {
+                      setGuardAnchor(streakCardRef.current?.getBoundingClientRect() ?? null);
+                      setShowGuard(true);
+                    }
                   }}
                   onKeyDown={e => {
                     if (e.key === 'Enter') e.target.blur();
@@ -382,7 +387,7 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
           </div>
         </div>
 
-        <CheatGuard visible={showGuard} onDone={() => setShowGuard(false)} />
+        <CheatGuard visible={showGuard} anchor={guardAnchor} onDone={() => setShowGuard(false)} />
 
         {/* Summertides */}
         {isSummertidesWindow && !summertidesDecl && (

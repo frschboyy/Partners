@@ -1,23 +1,33 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import Lottie from 'lottie-react';
-import animationData from '@/assets/cheat-guard.json';
 
-// Replace src/assets/cheat-guard.json with any Lottie JSON from lottiefiles.com
-// (search "finger wag" or "no no" → download JSON → drop in place)
-const hasAnimation = animationData?.layers?.length > 0;
+// anchor: a getBoundingClientRect()-shaped rect for the stat card that
+// triggered the guard, so it appears right next to the edit instead of a
+// fixed screen corner. Falls back to bottom-right if not provided.
+export default function CheatGuard({ visible, anchor, onDone }) {
+  // Read via ref rather than depending on onDone directly: Home re-renders
+  // every second (the live streak timer), which recreates the inline
+  // `onDone` callback each time — with `onDone` in the effect's dependency
+  // array, the effect re-ran on every one of those renders, clearing and
+  // restarting the dismiss timer before it ever reached 3.4s, so the guard
+  // used to never actually go away on its own.
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
 
-export default function CheatGuard({ visible, onDone }) {
   useEffect(() => {
     if (!visible) return;
-    const t = setTimeout(onDone, 3400);
+    const t = setTimeout(() => onDoneRef.current?.(), 3400);
     return () => clearTimeout(t);
-  }, [visible, onDone]);
+  }, [visible]);
+
+  const positionStyle = anchor
+    ? { position: 'fixed', top: anchor.bottom + 8, left: anchor.left, zIndex: 100 }
+    : { position: 'fixed', bottom: 80, right: 0, zIndex: 100 };
 
   return (
     <AnimatePresence>
       {visible && (
-        <div className="fixed bottom-20 right-0 z-[100] flex flex-col items-end pointer-events-none select-none">
+        <div className="flex flex-col items-end pointer-events-none select-none" style={positionStyle}>
           {/* Speech bubble pops in after the character arrives */}
           <motion.div
             initial={{ opacity: 0, scale: 0.5 }}
@@ -39,24 +49,14 @@ export default function CheatGuard({ visible, onDone }) {
             transition={{ type: 'spring', damping: 16, stiffness: 100 }}
             className="w-36 h-36"
           >
-            {hasAnimation ? (
-              <Lottie
-                animationData={animationData}
-                loop
-                autoplay
-                style={{ width: '100%', height: '100%' }}
-              />
-            ) : (
-              // Emoji fallback until a real Lottie file is added
-              <motion.div
-                className="w-full h-full flex items-center justify-center"
-                style={{ fontSize: 72 }}
-                animate={{ rotate: [0, -18, 18, -18, 18, -10, 0] }}
-                transition={{ duration: 0.7, delay: 0.1 }}
-              >
-                🙅
-              </motion.div>
-            )}
+            <motion.div
+              className="w-full h-full flex items-center justify-center"
+              style={{ fontSize: 72 }}
+              animate={{ rotate: [0, -18, 18, -18, 18, -10, 0] }}
+              transition={{ duration: 0.7, delay: 0.1 }}
+            >
+              🙅
+            </motion.div>
           </motion.div>
         </div>
       )}
