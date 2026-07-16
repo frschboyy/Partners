@@ -23,6 +23,14 @@ function computeVibeScore(rules, activePartnersCount) {
   const partnerPts = Math.min(activePartnersCount, 2) * 1;
   return Math.round(Math.min(streakPts + ratioPts + rulePts + partnerPts, 10) * 10) / 10;
 }
+
+function formatLocalDate(value) {
+  const date = new Date(value);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 import { useToast, Toast } from '@/components/Toast';
 import PartnershipFinancials from '@/components/PartnershipFinancials';
 import { api, supabase } from '@/api/supabaseClient';
@@ -363,23 +371,75 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
 
     setMilestoneCelebration(`streak_${days}`);
 
-    if (activePartners.length === 0) return;
     const name = profile?.display_name || currentUser.full_name;
     const partnerIds = activePartners.map(p => p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id);
+
+    const startDate = formatLocalDate(epochMs);
+    const endDate = formatLocalDate(new Date());
+    let milestoneStoryPhotos = [];
+
+    const { data: storyPosts, error: storyPostsError } = await supabase
+      .from('posts')
+      .select('photo_url, photo_urls, post_date')
+      .eq('user_id', currentUser.id)
+      .gte('post_date', startDate)
+      .lte('post_date', endDate)
+      .order('post_date', { ascending: true })
+      .limit(20);
+
+    if (!storyPostsError && Array.isArray(storyPosts)) {
+      const collected = [];
+      storyPosts.forEach(post => {
+        const urls = [];
+        if (post.photo_url) urls.push(post.photo_url);
+        if (Array.isArray(post.photo_urls)) urls.push(...post.photo_urls);
+        urls.forEach(url => {
+          if (url && !collected.includes(url)) collected.push(url);
+        });
+      });
+      milestoneStoryPhotos = collected.slice(0, 12);
+    }
+
+    if (milestoneStoryPhotos.length === 0) {
+      const { data: fallbackPosts, error: fallbackError } = await supabase
+        .from('posts')
+        .select('photo_url, photo_urls, post_date')
+        .eq('user_id', currentUser.id)
+        .order('post_date', { ascending: false })
+        .limit(12);
+
+      if (!fallbackError && Array.isArray(fallbackPosts)) {
+        const collected = [];
+        fallbackPosts.forEach(post => {
+          const urls = [];
+          if (post.photo_url) urls.push(post.photo_url);
+          if (Array.isArray(post.photo_urls)) urls.push(...post.photo_urls);
+          urls.forEach(url => {
+            if (url && !collected.includes(url)) collected.push(url);
+          });
+        });
+        milestoneStoryPhotos = collected.slice(0, 12);
+      }
+    }
+
+    const milestoneCaption = milestoneStoryPhotos.length > 0
+      ? `A little story of your streak so far — ${days} days of showing up.`
+      : `${milestone.title} — ${days} days without a slip! ${milestone.emoji}`;
 
     await api.entities.Post.create({
       user_id: currentUser.id,
       author_name: name,
       author_emoji: profile?.emoji_avatar || '😎',
       post_type: 'milestone',
-      caption: `${milestone.title} — ${days} days without a slip! ${milestone.emoji}`,
-      photo_url: '',
-      photo_urls: [],
+      caption: milestoneCaption,
+      photo_url: milestoneStoryPhotos[0] || '',
+      photo_urls: milestoneStoryPhotos,
       post_date: new Date().toISOString().split('T')[0],
       visible_to: [currentUser.id, ...partnerIds],
       reactions: [],
     });
 
+    if (partnerIds.length === 0) return;
     await Promise.all(partnerIds.map(partnerId =>
       supabase.from('notifications').insert({
         user_id: partnerId,

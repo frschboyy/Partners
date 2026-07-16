@@ -24,6 +24,7 @@ export default function FeedPost({
   onRefresh,
 }) {
   const photoUrls = post.photo_urls?.length > 0 ? post.photo_urls : (post.photo_url ? [post.photo_url] : []);
+  const isMilestonePost = post.post_type === 'milestone';
 
   const [focused, setFocused] = useState(false);
   const [imageIndex, setImageIndex] = useState(0);
@@ -188,7 +189,10 @@ export default function FeedPost({
     <div className="relative w-full h-full" onClick={() => !focused && !showGrid && setFocused(true)}>
 
       {/* Background — strip carousel for multiple photos, static for one */}
-      <div className="absolute inset-0 rounded-2xl overflow-hidden">
+      <div className={`absolute inset-0 rounded-[24px] overflow-hidden ${isMilestonePost ? 'border border-white/20 shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_24px_80px_rgba(0,0,0,0.35)]' : ''}`}>
+        {isMilestonePost && photoUrls.length > 1 ? (
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(255,255,255,0.28),_transparent_48%),linear-gradient(135deg,_rgba(255,255,255,0.16),_rgba(255,255,255,0.05))]" />
+        ) : null}
         {photoUrls.length > 1 ? (
           <motion.div
             className="absolute top-0 bottom-0 left-0 flex"
@@ -226,7 +230,7 @@ export default function FeedPost({
             </div>
           )
         )}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/30 pointer-events-none" />
+        <div className={`absolute inset-0 pointer-events-none ${isMilestonePost ? 'bg-gradient-to-t from-black/90 via-black/45 to-black/15' : 'bg-gradient-to-t from-black/80 via-transparent to-black/30'}`} />
       </div>
 
       {/* Arrow buttons */}
@@ -248,12 +252,12 @@ export default function FeedPost({
       )}
 
       {/* Top chrome */}
-      <div className="absolute top-4 left-4 right-4 flex items-start justify-between z-10">
+      <div className={`absolute top-4 left-4 right-4 flex items-start justify-between z-10 ${isMilestonePost ? 'rounded-2xl border border-white/15 bg-black/20 px-3 py-2 backdrop-blur-md' : ''}`}>
         <div className="flex items-center gap-2">
           <Avatar profile={authorProfile} size="sm" />
           <div>
             <p className="text-white text-sm font-bold leading-tight">{activePost.author_name}</p>
-            <p className="text-white/70 text-xs">{POST_TYPE_LABELS[activePost.post_type]}</p>
+            <p className={`text-xs ${isMilestonePost ? 'text-white/85' : 'text-white/70'}`}>{POST_TYPE_LABELS[activePost.post_type]}</p>
           </div>
         </div>
         <div className="flex flex-col items-end gap-1.5">
@@ -279,7 +283,7 @@ export default function FeedPost({
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
 
       {/* Bottom content */}
-      <div className="absolute bottom-0 left-0 right-0 p-4 z-10">
+      <div className={`absolute bottom-0 left-0 right-0 p-4 z-10 ${isMilestonePost ? 'bg-gradient-to-t from-black/85 via-black/30 to-transparent pt-6' : ''}`}>
         {photoUrls.length > 1 && (
           <div className="flex items-center justify-center gap-1.5 mb-2 pointer-events-none">
             {photoUrls.map((_, i) => (
@@ -296,8 +300,15 @@ export default function FeedPost({
           </div>
         )}
 
+        {isMilestonePost && (
+          <div className="mb-3 inline-flex items-center gap-2 self-start rounded-full border border-white/20 bg-white/15 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.3em] text-white/95 shadow-[0_8px_24px_rgba(0,0,0,0.18)] backdrop-blur-sm">
+            <span className="text-sm">✨</span>
+            <span>{post.photo_urls?.length > 0 ? 'Your streak story' : 'Milestone recap'}</span>
+          </div>
+        )}
+
         {post.caption ? (
-          <p className="text-white text-sm leading-relaxed mb-2 line-clamp-3">{post.caption}</p>
+          <p className={`text-sm leading-relaxed mb-2 line-clamp-3 ${isMilestonePost ? 'text-white/95 font-medium' : 'text-white'}`}>{post.caption}</p>
         ) : post.workout_type ? (
           <p className="text-white text-sm mb-2">
             <span className="font-bold">{post.workout_type}</span>
@@ -340,21 +351,21 @@ export default function FeedPost({
         </div>
 
         <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
-          <motion.button whileTap={{ scale: 0.85 }} onClick={() => setShowReactions(s => !s)} className="p-2.5 rounded-full bg-black/50 text-white">
+          <motion.button whileTap={{ scale: 0.85 }} onClick={() => setShowReactions(s => !s)} className={`p-2.5 rounded-full ${isMilestonePost ? 'bg-white/15 text-white backdrop-blur-sm' : 'bg-black/50 text-white'}`}>
             <Smile size={18} />
           </motion.button>
 
-          <motion.button whileTap={{ scale: 0.85 }} onClick={() => openComments()} className="p-2.5 rounded-full bg-black/50 text-white flex items-center gap-1">
+          <motion.button whileTap={{ scale: 0.85 }} onClick={() => openComments()} className={`p-2.5 rounded-full ${isMilestonePost ? 'bg-white/15 text-white backdrop-blur-sm' : 'bg-black/50 text-white'} flex items-center gap-1`}>
             <MessageCircle size={18} />
             {commentCount > 0 && <span className="text-xs font-bold">{commentCount}</span>}
           </motion.button>
 
           {focused && isMyPost && (
             <>
-              <motion.button whileTap={{ scale: 0.85 }} onClick={e => { e.stopPropagation(); openEditOverlay(); }} className="p-2.5 rounded-full bg-black/50 text-white">
+              <motion.button whileTap={{ scale: 0.85 }} onClick={e => { e.stopPropagation(); openEditOverlay(); }} className={`p-2.5 rounded-full ${isMilestonePost ? 'bg-white/15 text-white backdrop-blur-sm' : 'bg-black/50 text-white'}`}>
                 <Pencil size={18} />
               </motion.button>
-              <motion.button whileTap={{ scale: 0.85 }} onClick={() => setConfirmDelete(true)} className="p-2.5 rounded-full bg-black/50 text-red-400">
+              <motion.button whileTap={{ scale: 0.85 }} onClick={() => setConfirmDelete(true)} className={`p-2.5 rounded-full ${isMilestonePost ? 'bg-white/15 text-red-300 backdrop-blur-sm' : 'bg-black/50 text-red-400'}`}>
                 <Trash2 size={18} />
               </motion.button>
             </>
