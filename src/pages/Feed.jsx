@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { api, supabase } from '@/api/supabaseClient';
 import LocketFeed from '@/components/LocketFeed';
 import LogPostModal from '@/components/LogPostModal';
@@ -71,13 +71,18 @@ export default function Feed({ currentUser, profile }) {
   const [chatPartnership, setChatPartnership] = useState(null);
   const [partnerships, setPartnerships] = useState([]);
   const [showLogPost, setShowLogPost] = useState(false);
+  // loadFeed() also runs as onRefresh after comments/edits/deletes and after
+  // closing the log-post modal, not just on mount — gating the skeleton to
+  // the true first load only stops those background refreshes from flashing
+  // the whole feed back to skeletons and remounting the post cards.
+  const hasLoadedOnceRef = useRef(false);
 
   useEffect(() => {
     if (currentUser) loadFeed();
   }, [currentUser]);
 
   async function loadFeed() {
-    setLoading(true);
+    if (!hasLoadedOnceRef.current) setLoading(true);
     try {
       // Partnerships first so we can scope all subsequent queries to relevant users only
       const { data: myPartnerships = [] } = await supabase
@@ -122,6 +127,7 @@ export default function Feed({ currentUser, profile }) {
       }
 
       setPosts(feedPosts);
+      hasLoadedOnceRef.current = true;
       setLoading(false);
 
       // Secondary data — grid view and comment counts. Load after paint so the feed is visible immediately.
@@ -149,6 +155,7 @@ export default function Feed({ currentUser, profile }) {
     } catch (err) {
       console.error('Failed to load feed:', err?.message || err);
       showFeedToast('Failed to load feed — please refresh');
+      hasLoadedOnceRef.current = true;
       setLoading(false);
     }
   }

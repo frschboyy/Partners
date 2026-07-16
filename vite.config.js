@@ -9,6 +9,14 @@ export default defineConfig({
       '@': path.resolve(__dirname, 'src'),
     },
   },
+  server: {
+    // Fixed so the Google OAuth redirect always lands on the same
+    // localhost URL — strictPort fails loudly instead of silently picking a
+    // different port if 5173 is busy, which would otherwise quietly break
+    // that redirect until you noticed and re-allowlisted the new port.
+    port: 5173,
+    strictPort: true,
+  },
   build: {
     chunkSizeWarningLimit: 600,
     rollupOptions: {

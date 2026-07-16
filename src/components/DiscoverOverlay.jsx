@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, UserPlus, Search, Loader2 } from 'lucide-react';
 import { api, supabase } from '@/api/supabaseClient';
 import Avatar from '@/components/Avatar';
@@ -16,6 +16,12 @@ export default function DiscoverOverlay({ currentUser, currentProfile, onClose, 
   const [sending, setSending] = useState(null);
   // { [reqId]: 'accepting' | 'declining' | 'accepted' | 'declined' | 'error' }
   const [requestStates, setRequestStates] = useState({});
+  // loadData() also re-runs on any PartnerRequest/Partnership realtime event
+  // (not just this user's own — the subscriptions here are unfiltered) and
+  // after accepting a request, not just on open — gating the spinner to the
+  // true first load stops someone else's unrelated action elsewhere in the
+  // app from blanking this list back to a spinner mid-interaction.
+  const hasLoadedOnceRef = useRef(false);
 
   useEffect(() => {
     loadData();
@@ -27,7 +33,7 @@ export default function DiscoverOverlay({ currentUser, currentProfile, onClose, 
   }, []);
 
   async function loadData() {
-    setLoading(true);
+    if (!hasLoadedOnceRef.current) setLoading(true);
     const [allProfiles, outgoing, incoming, allPartnerships] = await Promise.all([
       api.entities.UserProfile.list(),
       api.entities.PartnerRequest.filter({ requester_id: currentUser.id, status: 'pending' }),
@@ -63,6 +69,7 @@ export default function DiscoverOverlay({ currentUser, currentProfile, onClose, 
     );
     setProfiles(filtered);
     setPendingOutgoing(outgoing.map(r => r.recipient_id));
+    hasLoadedOnceRef.current = true;
     setLoading(false);
   }
 

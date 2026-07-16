@@ -312,6 +312,15 @@
     }
   }
 
+  /* Reserves room for that same chevron so it never sits on top of the message
+     text it's positioned over — only needed on the same devices that actually
+     show the chevron, so touch devices don't carry unused padding. */
+  @media (hover: hover) and (pointer: fine) {
+    .desktop-chevron-clearance {
+      padding-right: 1.25rem;
+    }
+  }
+
   /* Feed full-screen */
   .feed-container {
     position: fixed;

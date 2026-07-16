@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { X, Plus, Trash2, CheckCircle, Send, Lock, RefreshCw } from 'lucide-react';
 import { api, supabase } from '@/api/supabaseClient';
 import { motion, AnimatePresence } from 'framer-motion';
+import { computeTermsDiff } from '@/lib/partnershipDiff';
 
 export default function PartnershipAgreementModal({ partnership, currentUserId, currentUserRules = [], onClose, onAgreed, onProposalSent }) {
   const [goals, setGoals] = useState(partnership.shared_goals || []);
@@ -17,6 +18,10 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
   const [saveError, setSaveError] = useState('');
   const [showRenegotiateConfirm, setShowRenegotiateConfirm] = useState(false);
   const [showDeclineConfirm, setShowDeclineConfirm] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [draftSavedAt, setDraftSavedAt] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [showHistory, setShowHistory] = useState(false);
 
   // Live partnership state — kept fresh via on-mount fetch + real-time subscription
   const [livePartnership, setLivePartnership] = useState(partnership);
@@ -45,9 +50,33 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
       }, payload => {
         if (payload.new) setLivePartnership(payload.new);
       })
+      // Proposal history is small per partnership, so a full refetch on any
+      // change is simpler and just as cheap as hand-merging insert/update deltas.
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'partnership_proposals',
+        filter: `partnership_id=eq.${partnership.id}`,
+      }, () => {
+        supabase.from('partnership_proposals').select('*')
+          .eq('partnership_id', partnership.id)
+          .order('created_at', { ascending: false })
+          .then(({ data }) => { if (data) setHistory(data); });
+      })
       .subscribe();
 
     return () => supabase.removeChannel(channel);
+  }, [partnership.id]);
+
+  // Initial history load — covers the case where nothing changes during this
+  // session, so the realtime refetch above never fires.
+  useEffect(() => {
+    let cancelled = false;
+    supabase.from('partnership_proposals').select('*')
+      .eq('partnership_id', partnership.id)
+      .order('created_at', { ascending: false })
+      .then(({ data }) => { if (!cancelled && data) setHistory(data); });
+    return () => { cancelled = true; };
   }, [partnership.id]);
 
   // When the partner submits a proposal while we have the modal open, sync the
@@ -69,20 +98,64 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
     prevCanAcceptRef.current = canAccept;
   }, [canAccept]);
 
-  // Prefill my rules section from personal rules (only if currently empty)
+  // Loads my saved draft on open, falling back to the personal-rules prefill
+  // this replaces — draft wins outright over prefill since it's a superset of
+  // what prefill would do. Gated on !proposalPending rather than !canAccept:
+  // if I'm already the proposer, livePartnership's committed terms already ARE
+  // what I proposed, so a stale leftover draft shouldn't override that.
   useEffect(() => {
-    if (isUserA && userARules.length === 0 && currentUserRules.length > 0) {
-      setUserARules(currentUserRules.map(r => r.title));
-    }
-    if (!isUserA && userBRules.length === 0 && currentUserRules.length > 0) {
-      setUserBRules(currentUserRules.map(r => r.title));
-    }
+    if (proposalPending) return;
+
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('partnership_drafts')
+        .select('draft_terms')
+        .eq('partnership_id', partnership.id)
+        .eq('user_id', currentUserId)
+        .maybeSingle();
+
+      if (cancelled) return;
+
+      if (data?.draft_terms) {
+        const t = data.draft_terms;
+        setGoals(t.shared_goals || []);
+        setPenalty(t.penalty_amount ?? 100);
+        setUserARules(t.user_a_rules || []);
+        setUserBRules(t.user_b_rules || []);
+        setSpecialAllowances(t.special_allowances || []);
+        return;
+      }
+
+      if (isUserA && userARules.length === 0 && currentUserRules.length > 0) {
+        setUserARules(currentUserRules.map(r => r.title));
+      }
+      if (!isUserA && userBRules.length === 0 && currentUserRules.length > 0) {
+        setUserBRules(currentUserRules.map(r => r.title));
+      }
+    })();
+
+    return () => { cancelled = true; };
   }, []);
 
   // Settled = both parties have agreed and status is active
   const isSettled = livePartnership.status === 'active'
     && livePartnership.user_a_agreed
     && livePartnership.user_b_agreed;
+
+  // Diffed from livePartnership directly (not local form state) so it never
+  // depends on the canAccept-sync effect above having already run this render.
+  const diff = useMemo(() => (
+    canAccept && livePartnership.previous_terms
+      ? computeTermsDiff(livePartnership.previous_terms, {
+          shared_goals: livePartnership.shared_goals,
+          penalty_amount: livePartnership.penalty_amount,
+          user_a_rules: livePartnership.user_a_rules,
+          user_b_rules: livePartnership.user_b_rules,
+          special_allowances: livePartnership.special_allowances,
+        })
+      : null
+  ), [canAccept, livePartnership]);
 
   function addGoal() {
     if (newGoal.trim()) { setGoals(g => [...g, newGoal.trim()]); setNewGoal(''); }
@@ -93,6 +166,32 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
       setSpecialAllowances(a => [...a, { ...newAllowance, id: Date.now().toString() }]);
       setNewAllowance({ name: '', for_user: 'both', date_start: '', date_end: '' });
     }
+  }
+
+  // Private per-user draft — separate table (not columns on partnerships),
+  // since partnerships has no RLS and both members already read the whole
+  // row client-side; a column pair would leak this over the wire regardless
+  // of UI intent. See supabase/migrations/009_partnership_drafts.sql.
+  async function handleSaveDraft() {
+    setSavingDraft(true);
+    try {
+      await supabase.from('partnership_drafts').upsert({
+        partnership_id: partnership.id,
+        user_id: currentUserId,
+        draft_terms: {
+          shared_goals: goals,
+          penalty_amount: Number(penalty) || 0,
+          user_a_rules: userARules,
+          user_b_rules: userBRules,
+          special_allowances: specialAllowances,
+        },
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'partnership_id,user_id' });
+      setDraftSavedAt(Date.now());
+    } catch (err) {
+      console.error('Failed to save draft:', err);
+    }
+    setSavingDraft(false);
   }
 
   async function handleSubmitProposal() {
@@ -120,6 +219,18 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
         return;
       }
 
+      // Snapshot whatever's currently committed, right before overwriting it, so
+      // the reviewer can later diff against it. Covers both a mid-negotiation
+      // counter-proposal and a "Propose Changes" reopening of a previously-active
+      // agreement — both funnel through this same function.
+      const previousTerms = {
+        shared_goals: livePartnership.shared_goals || [],
+        penalty_amount: livePartnership.penalty_amount || 0,
+        user_a_rules: livePartnership.user_a_rules || [],
+        user_b_rules: livePartnership.user_b_rules || [],
+        special_allowances: livePartnership.special_allowances || [],
+      };
+
       // Slot is ours — write the full proposal terms
       await api.entities.Partnership.update(partnership.id, {
         shared_goals:       goals,
@@ -129,6 +240,7 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
         special_allowances: specialAllowances,
         user_a_agreed:      false,
         user_b_agreed:      false,
+        previous_terms:     previousTerms,
       });
 
       const partnerId = isUserA ? partnership.user_b_id : partnership.user_a_id;
@@ -143,6 +255,34 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
         action_type: 'partnership_proposal',
         read: false,
       });
+
+      // Proposal history log + superseding any prior pending proposal from the
+      // other party — best-effort, must never block the core flow above.
+      supabase.from('partnership_proposals')
+        .update({ outcome: 'countered', resolved_at: new Date().toISOString() })
+        .eq('partnership_id', partnership.id)
+        .eq('outcome', 'pending')
+        .neq('proposer_id', currentUserId)
+        .catch(() => {});
+      supabase.from('partnership_proposals').insert({
+        partnership_id: partnership.id,
+        proposer_id: currentUserId,
+        proposer_name: myName,
+        terms: {
+          shared_goals: goals,
+          penalty_amount: Number(penalty) || 0,
+          user_a_rules: userARules,
+          user_b_rules: userBRules,
+          special_allowances: specialAllowances,
+        },
+        outcome: 'pending',
+      }).catch(() => {});
+      // Best-effort: this draft is now superseded by the real proposal.
+      supabase.from('partnership_drafts')
+        .delete()
+        .eq('partnership_id', partnership.id)
+        .eq('user_id', currentUserId)
+        .catch(() => {});
 
       onProposalSent?.();
       onClose();
@@ -181,6 +321,12 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
           read: false,
         },
       ]);
+      supabase.from('partnership_proposals')
+        .update({ outcome: 'accepted', resolved_at: new Date().toISOString() })
+        .eq('partnership_id', partnership.id)
+        .eq('proposer_id', livePartnership.last_proposer_id)
+        .eq('outcome', 'pending')
+        .catch(() => {});
       onAgreed?.();
       onClose();
     } catch (err) {
@@ -190,7 +336,13 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
     }
   }
 
-  async function handleWithdraw() {
+  // Renamed from the old "Withdraw" concept — this now just clears the
+  // proposal slot and leaves the modal open in compose mode with the same
+  // terms still visible/editable, rather than closing it (the button only
+  // shows when iProposed is true, so canAccept is already false; clearing
+  // last_proposer_id here never triggers a false→true transition on the
+  // canAccept-sync effect above, so local form state is left untouched).
+  async function handleEditProposal() {
     setSaving(true);
     setSaveError('');
     try {
@@ -203,17 +355,22 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
       await supabase.from('notifications').insert({
         user_id: partnerId,
         type: 'partnership_proposal',
-        title: `${myName} withdrew their proposal`,
-        body: 'The proposal has been pulled back. Either of you can now submit new terms.',
+        title: `${myName} is revising their proposal`,
+        body: 'They pulled it back to make changes — a new proposal is coming.',
         from_user_id: currentUserId,
         from_user_name: myName,
         action_id: partnership.id,
         action_type: 'partnership_proposal',
         read: false,
       });
-      onClose();
+      supabase.from('partnership_proposals')
+        .update({ outcome: 'withdrawn', resolved_at: new Date().toISOString() })
+        .eq('partnership_id', partnership.id)
+        .eq('proposer_id', currentUserId)
+        .eq('outcome', 'pending')
+        .catch(() => {});
     } catch (err) {
-      setSaveError('Failed to withdraw proposal — please try again.');
+      setSaveError('Failed to edit proposal — please try again.');
     } finally {
       setSaving(false);
     }
@@ -241,6 +398,14 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
           action_id: partnership.id,
           read: false,
         });
+      }
+      if (proposerId) {
+        supabase.from('partnership_proposals')
+          .update({ outcome: 'declined', resolved_at: new Date().toISOString() })
+          .eq('partnership_id', partnership.id)
+          .eq('proposer_id', proposerId)
+          .eq('outcome', 'pending')
+          .catch(() => {});
       }
       setShowDeclineConfirm(false);
       onClose();
@@ -446,24 +611,54 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
           <div className="px-5 pt-4 flex-shrink-0">
             {!proposalPending && (
               <div className="p-3 rounded-lg bg-secondary text-xs text-muted-foreground text-center">
-                Fill in the terms below and tap <strong>Submit Proposal</strong> to send to {partnerName}.
+                Fill in the terms below and tap <strong>Send Proposal</strong> to send to {partnerName}.
               </div>
             )}
             {proposalPending && iProposed && (
               <div className="p-3 rounded-lg bg-accent-muted text-xs text-center font-semibold" style={{ color: 'hsl(var(--theme-accent))' }}>
                 <CheckCircle size={14} className="inline mr-1.5 -mt-0.5" />
-                Proposal sent — waiting for {partnerName} to accept or counter-propose.
+                Waiting for {partnerName} to review your proposal…
               </div>
             )}
             {proposalPending && canAccept && (
               <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-xs text-center font-semibold text-yellow-500 space-y-1">
-                <p>🚫 {partnerName} already submitted a proposal.</p>
-                <p className="font-normal text-yellow-400">Review the terms below, then Accept or Counter-Propose — you cannot submit a new proposal right now.</p>
+                <p>{partnerName} suggested some changes — review them below.</p>
+                <p className="font-normal text-yellow-400">You can accept these terms or suggest changes of your own.</p>
               </div>
             )}
           </div>
 
+          {!proposalPending && (
+            <div className="px-5 pt-2 flex-shrink-0 flex items-center justify-end gap-2">
+              {draftSavedAt && <span className="text-[10px] text-muted-foreground">Draft saved</span>}
+              <button onClick={handleSaveDraft} disabled={savingDraft} className="text-xs font-semibold text-muted-foreground underline">
+                {savingDraft ? 'Saving…' : 'Save Draft'}
+              </button>
+            </div>
+          )}
+
           <div className="overflow-y-auto flex-1 p-5 space-y-6">
+            {/* What changed — only for an incoming proposal with something to diff against */}
+            {diff?.hasChanges && (
+              <section className="space-y-1.5 p-3 rounded-lg border border-yellow-500/30 bg-yellow-500/5">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-yellow-500">What changed</h3>
+                {diff.penaltyChanged && (
+                  <div className="text-sm">
+                    Penalty: <span className="line-through text-muted-foreground">{diff.penaltyChanged.from} KSH</span>{' '}
+                    → <span className="font-bold">{diff.penaltyChanged.to} KSH</span>
+                  </div>
+                )}
+                {diff.goalsAdded.map(g => <div key={`ga-${g}`} className="text-sm text-green-500">+ Goal: {g}</div>)}
+                {diff.goalsRemoved.map(g => <div key={`gr-${g}`} className="text-sm text-destructive line-through">Goal: {g}</div>)}
+                {diff.rulesAddedA.map(r => <div key={`raa-${r}`} className="text-sm text-green-500">+ {partnership.user_a_name}'s rule: {r}</div>)}
+                {diff.rulesRemovedA.map(r => <div key={`rra-${r}`} className="text-sm text-destructive line-through">{partnership.user_a_name}'s rule: {r}</div>)}
+                {diff.rulesAddedB.map(r => <div key={`rab-${r}`} className="text-sm text-green-500">+ {partnership.user_b_name}'s rule: {r}</div>)}
+                {diff.rulesRemovedB.map(r => <div key={`rrb-${r}`} className="text-sm text-destructive line-through">{partnership.user_b_name}'s rule: {r}</div>)}
+                {diff.allowancesAdded.map(a => <div key={`aa-${a.name}`} className="text-sm text-green-500">+ Allowance: {a.name}</div>)}
+                {diff.allowancesRemoved.map(a => <div key={`ar-${a.name}`} className="text-sm text-destructive line-through">Allowance: {a.name}</div>)}
+              </section>
+            )}
+
             {/* Shared Goals */}
             <section className="space-y-2">
               <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Shared Goals</h3>
@@ -554,6 +749,26 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
                 <button onClick={addAllowance} className="w-full py-1.5 rounded bg-primary text-primary-foreground text-xs font-semibold">Add Allowance</button>
               </div>
             </section>
+
+            {/* Proposal history — low-emphasis, collapsed by default, doesn't compete with compose/review UI above */}
+            {history.length > 0 && (
+              <section className="space-y-2">
+                <button onClick={() => setShowHistory(s => !s)} className="text-xs font-semibold text-muted-foreground underline">
+                  {showHistory ? 'Hide' : 'Show'} proposal history ({history.length})
+                </button>
+                {showHistory && (
+                  <div className="space-y-1.5">
+                    {history.map(h => (
+                      <div key={h.id} className="flex items-center justify-between bg-secondary rounded-lg px-3 py-2 text-xs">
+                        <span>{h.proposer_name}</span>
+                        <span className="capitalize">{h.outcome}</span>
+                        <span className="text-muted-foreground">{new Date(h.created_at).toLocaleDateString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
           </div>
 
           {/* Footer actions */}
@@ -578,7 +793,7 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
                   disabled={saving}
                   className="w-full py-2.5 rounded-lg border border-border text-sm font-semibold text-foreground flex items-center justify-center gap-2"
                 >
-                  <Send size={14} /> Counter-Propose
+                  <Send size={14} /> Suggest Changes
                 </motion.button>
                 <motion.button
                   whileTap={{ scale: 0.96 }}
@@ -599,16 +814,16 @@ export default function PartnershipAgreementModal({ partnership, currentUserId, 
                   style={{ background: 'hsl(var(--theme-accent))', color: 'hsl(var(--theme-accent-fg))' }}
                 >
                   <Send size={15} />
-                  {saving ? 'Sending…' : iProposed ? 'Proposal sent — awaiting response' : 'Submit Proposal'}
+                  {saving ? 'Sending…' : iProposed ? 'Proposal sent — awaiting response' : 'Send Proposal'}
                 </motion.button>
                 {iProposed && (
                   <motion.button
                     whileTap={{ scale: 0.96 }}
-                    onClick={handleWithdraw}
+                    onClick={handleEditProposal}
                     disabled={saving}
                     className="w-full py-2 rounded-lg text-xs font-semibold text-muted-foreground border border-border bg-secondary"
                   >
-                    Withdraw proposal
+                    Edit Proposal
                   </motion.button>
                 )}
               </>

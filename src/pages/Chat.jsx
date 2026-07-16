@@ -70,28 +70,52 @@ const SWIPE_REPLY_MAX = 72;
 // action menu below) relative to the message's measured rect. Prefers reaction
 // bar above / menu below; if the menu wouldn't fit before the composer, flips to
 // stack both above the message instead — so it always stays fully on-screen.
+// Every returned position is anchored relative to the message's own rect —
+// never pinned to a fixed screen coordinate — so the reaction bar + menu can
+// never land on top of the message itself, regardless of where it sits on
+// screen. Three layouts, tried in order of preference:
+//  1. Split: reaction bar directly above the message, menu directly below.
+//  2. Both below: reaction bar + menu stacked together under the message.
+//  3. Both above: reaction bar + menu stacked together above the message.
+// If none fully fits (a very tall action list on a short screen), the stack
+// still goes wherever has more room, adjacent to the message — it may push
+// past the header/composer safe margins in that extreme case, but it will
+// never overlap the message, which matters more.
 function getOverlayLayout(rect, itemCount) {
   if (!rect) return null;
   const menuHeight = itemCount * MENU_ITEM_HEIGHT;
+  const stackHeight = REACTION_BAR_HEIGHT + REACTION_GAP + menuHeight;
   const viewportH = window.innerHeight;
   const spaceBelow = viewportH - rect.bottom - COMPOSER_SAFE_BOTTOM;
   const spaceAbove = rect.top - HEADER_SAFE_TOP;
 
-  if (spaceBelow >= menuHeight + REACTION_GAP) {
+  if (spaceAbove >= REACTION_BAR_HEIGHT + REACTION_GAP && spaceBelow >= menuHeight + MENU_GAP) {
     return {
-      reactionTop: Math.max(rect.top - REACTION_GAP - REACTION_BAR_HEIGHT, HEADER_SAFE_TOP),
+      reactionTop: rect.top - REACTION_GAP - REACTION_BAR_HEIGHT,
       menuTop: rect.bottom + MENU_GAP,
     };
   }
-  if (spaceAbove >= menuHeight + REACTION_BAR_HEIGHT + REACTION_GAP * 2) {
+  if (spaceBelow >= stackHeight + REACTION_GAP) {
+    return {
+      reactionTop: rect.bottom + REACTION_GAP,
+      menuTop: rect.bottom + REACTION_GAP * 2 + REACTION_BAR_HEIGHT,
+    };
+  }
+  if (spaceAbove >= stackHeight + REACTION_GAP) {
     return {
       reactionTop: rect.top - REACTION_GAP - REACTION_BAR_HEIGHT,
       menuTop: rect.top - REACTION_GAP * 2 - REACTION_BAR_HEIGHT - menuHeight,
     };
   }
+  if (spaceBelow >= spaceAbove) {
+    return {
+      reactionTop: rect.bottom + REACTION_GAP,
+      menuTop: rect.bottom + REACTION_GAP * 2 + REACTION_BAR_HEIGHT,
+    };
+  }
   return {
-    reactionTop: HEADER_SAFE_TOP,
-    menuTop: HEADER_SAFE_TOP + REACTION_BAR_HEIGHT + REACTION_GAP,
+    reactionTop: rect.top - REACTION_GAP - REACTION_BAR_HEIGHT,
+    menuTop: rect.top - REACTION_GAP * 2 - REACTION_BAR_HEIGHT - menuHeight,
   };
 }
 
@@ -1124,7 +1148,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
               exit={{ opacity: 0, scale: 0.9, y: -6 }}
               transition={{ type: 'spring', damping: 24, stiffness: 420 }}
               className="fixed z-[56] flex flex-col min-w-[190px] rounded-2xl border border-border shadow-2xl overflow-hidden"
-              style={{ top: overlayLayout.menuTop, ...activeMsgSide, background: 'hsl(var(--popover))' }}
+              style={{ top: overlayLayout.menuTop, ...activeMsgSide, background: 'hsl(var(--popover))', color: 'hsl(var(--popover-foreground))' }}
             >
               {activeMsgActions.map(a => (
                 <button
@@ -1167,7 +1191,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                 {showSelectionMenu && (
                   <div
                     className="absolute top-full right-0 mt-1 z-30 flex flex-col min-w-[190px] rounded-xl border border-border shadow-lg overflow-hidden"
-                    style={{ background: 'hsl(var(--popover))' }}
+                    style={{ background: 'hsl(var(--popover))', color: 'hsl(var(--popover-foreground))' }}
                   >
                     {getSelectionActions(selectedMsgs).map(a => (
                       <button
@@ -1201,8 +1225,14 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
           </div>
         )}
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3" onScroll={handleMessagesScroll}>
+        {/* Messages — scroll is locked while the quick-action overlay (long-press/
+            right-click) is open, since it's a backdrop-based focus mode, not a
+            normal popover; the background shouldn't be scrollable underneath it
+            until the user taps out. */}
+        <div
+          className={`flex-1 p-4 space-y-3 ${activeMessageId ? 'overflow-hidden' : 'overflow-y-auto'}`}
+          onScroll={handleMessagesScroll}
+        >
           {loadingMessages ? (
             <div className="space-y-3 animate-pulse pt-2">
               {[
@@ -1398,7 +1428,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                             <div
                               ref={chevronMenuRef}
                               className="absolute top-full right-0 mt-1 z-30 flex flex-col min-w-[180px] rounded-xl border border-border shadow-lg overflow-hidden"
-                              style={{ background: 'hsl(var(--popover))' }}
+                              style={{ background: 'hsl(var(--popover))', color: 'hsl(var(--popover-foreground))' }}
                               onClick={e => e.stopPropagation()}
                             >
                               {getMessageMenuActions(msg, perms, () => setChevronMenuMsgId(null)).map(a => (
@@ -1449,7 +1479,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                           <div
                             ref={chevronMenuRef}
                             className="absolute top-full right-0 mt-1 z-30 flex flex-col min-w-[180px] rounded-xl border border-border shadow-lg overflow-hidden"
-                            style={{ background: 'hsl(var(--popover))' }}
+                            style={{ background: 'hsl(var(--popover))', color: 'hsl(var(--popover-foreground))' }}
                             onClick={e => e.stopPropagation()}
                           >
                             {getMessageMenuActions(msg, perms, () => setChevronMenuMsgId(null)).map(a => (
@@ -1490,7 +1520,7 @@ export default function Chat({ currentUser, profile, onTabChange, navIntent, onC
                           </div>
                         ) : (
                           <>
-                            <p className="text-sm leading-relaxed">{msg.content}</p>
+                            <p className={`text-sm leading-relaxed ${canAct && !selectionActive && !isActive ? 'desktop-chevron-clearance' : ''}`}>{msg.content}</p>
                             <div className="flex items-center justify-end gap-0.5 mt-0.5">
                               <span className="text-[10px] opacity-60">
                                 {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

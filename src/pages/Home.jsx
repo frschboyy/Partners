@@ -39,12 +39,54 @@ import SelfSlipSection from '@/components/SelfSlipSection';
 import CheatGuard from '@/components/CheatGuard';
 import { SUMMERTIDES } from '@/lib/constants';
 
+// Home fully unmounts on tab-away (App.jsx only renders the active tab), so an
+// in-memory cache needs to live outside the component to survive that — a
+// module-level Map persists for the page's lifetime regardless of mount state.
+// This is a paint optimization only: loadAll() always still runs and refreshes
+// it; the cache just lets a return visit skip straight to real content instead
+// of re-running the skeleton every time.
+const homeDataCache = new Map();
+
+function HomeSkeleton() {
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="space-y-2">
+          <div className="h-2.5 w-24 bg-muted rounded-full animate-pulse" />
+          <div className="h-6 w-36 bg-muted rounded-full animate-pulse" />
+        </div>
+        <div className="w-11 h-11 rounded-full bg-muted animate-pulse" />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="card-brutal p-3 h-20 animate-pulse bg-muted rounded-lg" />
+        <div className="card-brutal p-3 h-20 animate-pulse bg-muted rounded-lg" />
+      </div>
+      <div className="space-y-3">
+        <div className="h-5 w-20 bg-muted rounded-full animate-pulse" />
+        <div className="space-y-2">
+          {[1, 2].map(i => (
+            <div key={i} className="card-brutal p-3 h-14 animate-pulse bg-muted rounded-lg" />
+          ))}
+        </div>
+      </div>
+      <div className="space-y-3">
+        <div className="h-5 w-20 bg-muted rounded-full animate-pulse" />
+        <div className="space-y-3">
+          {[1, 2].map(i => (
+            <div key={i} className="card-brutal p-3 h-20 animate-pulse bg-muted rounded-lg" />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Home({ currentUser, profile, onProfileUpdate, navIntent, onClearNavIntent }) {
   const { message: homeToastMsg, variant: homeToastVariant, show: showHomeToast } = useToast();
-  const [rules, setRules] = useState([]);
-  const [partnerships, setPartnerships] = useState([]);
-  const [partnerProfiles, setPartnerProfiles] = useState({});
-  const [loading, setLoading] = useState(true);
+  const [rules, setRules] = useState(() => homeDataCache.get(currentUser?.id)?.rules ?? []);
+  const [partnerships, setPartnerships] = useState(() => homeDataCache.get(currentUser?.id)?.partnerships ?? []);
+  const [partnerProfiles, setPartnerProfiles] = useState(() => homeDataCache.get(currentUser?.id)?.partnerProfiles ?? {});
+  const [loading, setLoading] = useState(() => !homeDataCache.has(currentUser?.id));
   const [showAddRule, setShowAddRule] = useState(false);
   const [showDiscover, setShowDiscover] = useState(false);
   const [showLogPost, setShowLogPost] = useState(false);
@@ -63,12 +105,19 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
   const [editValue, setEditValue] = useState('');
   const [removing, setRemoving] = useState(false);
   const [toast, setToast] = useState(null);
-  const [summertidesDecl, setSummertidesDecl] = useState(null);
+  const [summertidesDecl, setSummertidesDecl] = useState(() => homeDataCache.get(currentUser?.id)?.summertidesDecl ?? null);
   const [showSummertides, setShowSummertides] = useState(false);
   const partnersRef = useRef(null);
   const [partnerSearch, setPartnerSearch] = useState('');
+  // Gates the page-level skeleton (see `pageReady` below). loadAll() runs on
+  // every realtime subscription event and every overlay dismissal, not just the
+  // initial mount — without this ref, each of those background refreshes would
+  // flip `loading` true/false again, swapping the real content out for the
+  // skeleton and back for no reason even when nothing on screen actually
+  // changed. Seeded true on a cache hit so a return visit never re-shows it.
+  const hasLoadedOnceRef = useRef(homeDataCache.has(currentUser?.id));
 
-  const [lastSlipAt, setLastSlipAt] = useState(null);
+  const [lastSlipAt, setLastSlipAt] = useState(() => homeDataCache.get(currentUser?.id)?.lastSlipAt ?? null);
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
@@ -92,6 +141,15 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
     ];
     return () => unsubs.forEach(fn => fn());
   }, [currentUser]);
+
+  // Keeps the cache in sync with every state change, not just loadAll()'s own
+  // writes — direct-mutation paths (adding/deleting a rule) update state
+  // without going through loadAll(), and those need to reach the cache too so
+  // switching tabs away and back right after doesn't show stale data.
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    homeDataCache.set(currentUser.id, { rules, partnerships, partnerProfiles, summertidesDecl, lastSlipAt });
+  }, [rules, partnerships, partnerProfiles, summertidesDecl, lastSlipAt, currentUser?.id]);
 
   useEffect(() => {
     if (!toast) return;
@@ -117,7 +175,7 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
 
 
   async function loadAll() {
-    setLoading(true);
+    if (!hasLoadedOnceRef.current) setLoading(true);
     try {
       const [myRules, partnershipsResult, declList, lastSlipResult] = await Promise.all([
         api.entities.Rule.filter({ user_id: currentUser.id }),
@@ -162,6 +220,7 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
       console.error('Failed to load dashboard:', err?.message || err);
       showHomeToast('Failed to load data — please refresh');
     }
+    hasLoadedOnceRef.current = true;
     setLoading(false);
   }
 
@@ -244,11 +303,16 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
   const partnerUserIds = [...activePartners, ...negotiatingPartners].map(
     p => p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id
   );
+  // True once the true first load has completed OR was skipped via a cache
+  // hit — false only for the genuine "nothing to show yet" first render.
+  const pageReady = hasLoadedOnceRef.current || !loading;
 
   return (
     <div className="flex flex-col min-h-screen bg-background pb-24">
       <Toast message={homeToastMsg} variant={homeToastVariant} position="top" />
-      <div className="max-w-lg mx-auto w-full px-4 pt-6 space-y-6">
+      <div className="max-w-lg mx-auto w-full px-4 pt-6">
+        {pageReady ? (
+        <div className="space-y-6 animate-content-reveal">
 
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -361,13 +425,7 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
             </motion.button>
           </div>
 
-          {loading ? (
-            <div className="space-y-2">
-              {[1, 2].map(i => (
-                <div key={i} className="card-brutal p-3 h-14 animate-pulse bg-muted rounded-lg" />
-              ))}
-            </div>
-          ) : rules.length === 0 ? (
+          {rules.length === 0 ? (
             <div className="card-brutal p-6 text-center animate-content-reveal space-y-3">
               <p className="text-3xl">📋</p>
               <p className="font-semibold">No rules yet</p>
@@ -423,12 +481,6 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
 
           {/* Fixed-height scrollable card list — sized to show ~2 cards */}
           <div className="overflow-y-auto space-y-3" style={{ maxHeight: 384 }}>
-            {loading && (
-              <>
-                <div className="card-brutal p-3 h-20 animate-pulse bg-muted rounded-lg" />
-                <div className="card-brutal p-3 h-20 animate-pulse bg-muted rounded-lg" />
-              </>
-            )}
             {/* Negotiating partnerships — remain fully active, renegotiation is an overlay */}
             {filteredNegotiating.map(p => {
               const partnerId = p.user_a_id === currentUser.id ? p.user_b_id : p.user_a_id;
@@ -490,7 +542,7 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
             })}
 
             {/* Empty state */}
-            {!loading && activePartners.length === 0 && negotiatingPartners.length === 0 && (
+            {activePartners.length === 0 && negotiatingPartners.length === 0 && (
               <div className="card-brutal p-6 text-center animate-content-reveal space-y-3">
                 <p className="text-3xl">🔭</p>
                 <p className="font-semibold">No partners yet</p>
@@ -598,6 +650,10 @@ export default function Home({ currentUser, profile, onProfileUpdate, navIntent,
             <ChevronDown size={16} />
           </motion.button>
         </div>
+        </div>
+        ) : (
+          <HomeSkeleton />
+        )}
       </div>
 
       {/* FAB: Log post */}

@@ -64,12 +64,16 @@ function MyStickersTab({ currentUser, onSelect }) {
   const [uploading, setUploading] = useState(false);
   const [hoveredId, setHoveredId] = useState(null);
   const fileInputRef = useRef(null);
+  // loadStickers() also re-runs after every upload, not just on mount —
+  // gating the skeleton to the true first load stops each upload from
+  // flashing the whole sticker grid back to skeletons.
+  const hasLoadedOnceRef = useRef(false);
 
   const folder = `stickers/${currentUser?.id}`;
 
   async function loadStickers() {
     if (!currentUser?.id) return;
-    setLoading(true);
+    if (!hasLoadedOnceRef.current) setLoading(true);
     try {
       const { data, error } = await supabase.storage.from('uploads').list(folder, { limit: 100, sortBy: { column: 'created_at', order: 'desc' } });
       if (error) throw error;
@@ -82,6 +86,7 @@ function MyStickersTab({ currentUser, onSelect }) {
     } catch {
       setStickers([]);
     }
+    hasLoadedOnceRef.current = true;
     setLoading(false);
   }
 

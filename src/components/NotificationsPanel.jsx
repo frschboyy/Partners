@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { api, supabase } from '@/api/supabaseClient';
 import { formatDateTime } from '@/lib/dateUtils';
 import { motion } from 'framer-motion';
@@ -39,6 +39,10 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
   const [loading, setLoading] = useState(true);
   const [pendingSlips, setPendingSlips] = useState([]);
   const { message: toastMessage, variant: toastVariant, show: showToast } = useToast();
+  // loadAll() also re-runs on every incoming Notification/Slip realtime event,
+  // not just on open — gating the spinner to the true first load stops those
+  // background refreshes from blanking the whole panel back to a spinner.
+  const hasLoadedOnceRef = useRef(false);
 
   const needsSetPassword =
     !currentUser?.identities?.some(i => i.provider === 'email') &&
@@ -54,7 +58,7 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
   }, []);
 
   async function loadAll() {
-    setLoading(true);
+    if (!hasLoadedOnceRef.current) setLoading(true);
     try {
       const [notifs, slips] = await Promise.all([
         api.entities.Notification.filter({ user_id: currentUser.id }, '-created_at', 30),
@@ -74,6 +78,7 @@ export default function NotificationsPanel({ currentUser, profile, onClose, onNa
     } catch (err) {
       console.error('Failed to load notifications:', err?.message || err);
     }
+    hasLoadedOnceRef.current = true;
     setLoading(false);
   }
 
