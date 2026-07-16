@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { flushSync } from 'react-dom';
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from 'framer-motion';
 import { ChevronDown } from 'lucide-react';
 import FeedPost from '@/components/FeedPost';
@@ -46,7 +47,18 @@ export default function LocketFeed({
       duration: 0.32,
       ease: [0.32, 0.72, 0, 1],
       onComplete: () => {
-        setCurrentIndex(i => i + 1);
+        // setCurrentIndex swaps the main card's `key`, unmounting the old post's
+        // FeedPost/img and mounting the new one — but that's a normal React state
+        // update, which commits asynchronously. y.set(0) below is a Framer Motion
+        // value write, which applies to the DOM immediately. Left in the "natural"
+        // order (state update first, motion value second), the transform could
+        // reset to the resting position — revealing the main card at full opacity —
+        // one or more frames before React actually swaps in the new post, which is
+        // exactly what showed up as the previous image flashing back into view.
+        // flushSync forces the state update (and the new post's mount) to commit
+        // before y.set(0) runs, so the content is already correct by the time the
+        // card is visually back at rest.
+        flushSync(() => setCurrentIndex(i => i + 1));
         y.set(0);
         transitioning.current = false;
       },
@@ -63,7 +75,10 @@ export default function LocketFeed({
       duration: 0.32,
       ease: [0.32, 0.72, 0, 1],
       onComplete: () => {
-        setCurrentIndex(i => i - 1);
+        // See the matching comment in goNext — flushSync keeps the state update
+        // (and the resulting remount) ahead of the motion-value reset so the
+        // transform never snaps back to rest while the old post is still mounted.
+        flushSync(() => setCurrentIndex(i => i - 1));
         y.set(0);
         transitioning.current = false;
       },
