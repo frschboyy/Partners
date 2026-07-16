@@ -32,8 +32,13 @@ export default function ReactionEmojiPicker({ onSelect }) {
         height: 360,
         maxHeight: '70dvh',
         top: '15%',
-        left: '50%',
-        transform: 'translateX(-50%)',
+        // Centered via `left` instead of `transform: translateX(-50%)` —
+        // this element also animates `scale`/`y` through Framer Motion's
+        // `animate` prop, and Motion manages the `transform` CSS property
+        // itself for those; a manual `transform` set alongside it gets
+        // silently overwritten every frame, which is what was dropping the
+        // horizontal centering and pushing the picker off the right edge.
+        left: 'calc(50% - 160px)',
       }}
       onClick={e => e.stopPropagation()}
     >
