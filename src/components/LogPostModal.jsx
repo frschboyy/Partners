@@ -122,22 +122,37 @@ export default function LogPostModal({ currentUser, profile, rules = [], partner
     if (!files.length) return;
     setUploading(true);
     setPhotoError('');
-    try {
-      // Compress one at a time — compressing several large camera photos in parallel
-      // (common on Android when batch-selecting from the gallery) can spike memory
-      // enough to corrupt a canvas decode on lower-end devices.
-      const compressed = [];
-      for (const f of files) {
-        compressed.push(await compressImage(f));
+
+    // Compress and upload one photo at a time, independently. Doing this
+    // sequentially (rather than in parallel) avoids spiking memory on
+    // lower-end Android devices — large camera photos decoded in parallel are
+    // a known source of canvas corruption there. Handling each photo's
+    // failure independently (rather than one Promise.all for the batch)
+    // means a single corrupted/oversized photo doesn't take the rest of the
+    // batch down with it.
+    const newUrls = [];
+    let failCount = 0;
+    for (const f of files) {
+      try {
+        const compressed = await compressImage(f);
+        const { file_url } = await api.integrations.Core.UploadFile({ file: compressed });
+        if (file_url) newUrls.push(file_url);
+      } catch (err) {
+        failCount++;
       }
-      const uploads = await Promise.all(
-        compressed.map(file => api.integrations.Core.UploadFile({ file }))
-      );
-      const newUrls = uploads.map(r => r.file_url).filter(Boolean);
-      setPhotoUrls(prev => [...prev, ...newUrls]);
-    } catch (err) {
-      setPhotoError(err?.userMessage ?? 'Upload failed. Please try again.');
     }
+
+    if (newUrls.length) {
+      setPhotoUrls(prev => [...prev, ...newUrls]);
+    }
+    if (failCount > 0) {
+      setPhotoError(
+        newUrls.length
+          ? `${failCount} photo${failCount !== 1 ? 's' : ''} failed to upload — the rest were added.`
+          : 'All photos failed to upload. Please try again.'
+      );
+    }
+
     setUploading(false);
     // reset input so same file can be re-selected
     if (fileInputRef.current) fileInputRef.current.value = '';
