@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { api, supabase } from '@/api/supabaseClient';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Moon, Sun, Camera, LogOut, Check, Eye, EyeOff, Lock, ChevronDown, Trash2 } from 'lucide-react';
+import { Moon, Sun, Camera, LogOut, Check, Eye, EyeOff, Lock, ChevronDown, Trash2, Share2 } from 'lucide-react';
 import { THEMES, applyTheme, saveTheme, FONT_SIZES, applyFontSize, getSavedFontSize, saveFontSize, applyCustomHue, saveCustomHue, getSavedCustomHue } from '@/lib/theme';
 import Avatar from '@/components/Avatar';
 import { useToast, Toast } from '@/components/Toast';
@@ -185,6 +185,28 @@ export default function Settings({ currentUser, profile, onProfileUpdate, curren
     }
   }
 
+  async function handleShare() {
+    const shareData = {
+      title: 'Partners',
+      text: 'I\'m using Partners to stay accountable with a partner — streaks, stakes, and real follow-through. Join me!',
+      url: window.location.origin,
+    };
+    if (navigator.share) {
+      try {
+        await navigator.share(shareData);
+      } catch (err) {
+        if (err?.name !== 'AbortError') showToast('Could not share', 'error');
+      }
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(`${shareData.text} ${shareData.url}`);
+      showToast('Link copied to clipboard!');
+    } catch {
+      showToast('Could not copy link', 'error');
+    }
+  }
+
   function handleCustomHueChange(hue) {
     setCustomHue(hue);
     saveCustomHue(hue);
@@ -221,9 +243,19 @@ export default function Settings({ currentUser, profile, onProfileUpdate, curren
     <div className="flex flex-col min-h-screen bg-background pb-24">
       <Toast message={toastMessage} variant={toastVariant} position="top" />
       <div className="max-w-lg mx-auto w-full px-4 pt-6 space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold font-heading">Settings</h1>
-          <p className="text-sm text-muted-foreground mt-1">Customise your experience</p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold font-heading">Settings</h1>
+            <p className="text-sm text-muted-foreground mt-1">Customise your experience</p>
+          </div>
+          <motion.button
+            whileTap={{ scale: 0.94 }}
+            onClick={handleShare}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-secondary text-xs font-semibold flex-shrink-0 mt-1"
+          >
+            <Share2 size={14} />
+            Share
+          </motion.button>
         </div>
 
         {/* Avatar & Profile */}
